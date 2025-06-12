@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # 定义数据集和结果路径
-DATASET="Zhang_CancerCell_2025.Sample_MajorCluster"
-RESULT_PATH="Zhang_CancerCell_2025.Sample_MajorCluster"
+DATASET="Zhang_CancerCell_2025.Sample_SubCluster"
+RESULT_PATH="Zhang_CancerCell_2025.Sample_SubCluster"
 
 # 定义基因列表
 GENES=("CLOCK" "NFIL3" "ARNTL" "NPAS2" "NR1D1" "CRY1" "CRY2" "PER1" "PER2" "PER3")
