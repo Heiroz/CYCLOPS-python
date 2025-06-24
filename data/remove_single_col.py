@@ -2,7 +2,7 @@ import pandas as pd
 from collections import Counter
 
 def remove_single_occurrence_celltype(input_path, output_path=None):
-    df = pd.read_csv(input_path, header=0)
+    df = pd.read_csv(input_path, header=0, low_memory=False)
     celltype_row = df.iloc[0]
     samples = df.columns[1:]
     celltype_values = celltype_row[samples]
@@ -21,5 +21,5 @@ def remove_single_occurrence_celltype(input_path, output_path=None):
     df.to_csv(output_path, index=False)
 
 remove_single_occurrence_celltype(
-    "Zhang_CancerCell_2025.Sample_SubCluster/expression_hat.csv"
+    "HTAN_HTAPP/expression.csv"
 )

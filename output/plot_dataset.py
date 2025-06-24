@@ -4,15 +4,16 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import UnivariateSpline
 import numpy as np
 import argparse
+from scipy.optimize import curve_fit
 
 def load_fit_output(file_name):
     """加载 Fit_Output 文件并返回 ID 和 Phase 的字典"""
-    fit_df = pd.read_csv(file_name)
+    fit_df = pd.read_csv(file_name, low_memory=False)
     return dict(zip(fit_df["ID"], fit_df["Phase"]))
 
 def load_expression_data(expression_file, gene):
     """加载表达矩阵并返回目标基因的表达数据"""
-    expr_df = pd.read_csv(expression_file)
+    expr_df = pd.read_csv(expression_file, low_memory=False)
     gene_row = expr_df[expr_df["Gene_Symbol"] == gene]
     if gene_row.empty:
         return None
@@ -29,14 +30,27 @@ def collect_plot_data(expr_dict, id_phase):
     return plot_data
 
 def plot_data_and_save(phases, exprs, gene, file_name, saved_path):
-    """绘制散点图和拟合曲线，并保存图像"""
+    """绘制散点图和正弦拟合曲线，并保存图像"""
     plt.figure(figsize=(8, 6))
     plt.scatter(phases, exprs, label="Samples", alpha=0.7)
 
-    spline = UnivariateSpline(phases, exprs, s=1)
-    xs = np.linspace(0, 2 * np.pi, 200)
-    ys = spline(xs)
-    plt.plot(xs, ys, color="red", label="Spline fit")
+    # 正弦拟合
+    def sin_func(x, A, w, phi, C):
+        return A * np.sin(w * x + phi) + C
+
+
+    # 初始参数估计
+    A_guess = (max(exprs) - min(exprs)) / 2
+    w_guess = 1
+    phi_guess = 0
+    C_guess = np.mean(exprs)
+    try:
+        popt, _ = curve_fit(sin_func, phases, exprs, p0=[A_guess, w_guess, phi_guess, C_guess], maxfev=10000)
+        xs = np.linspace(0, 2 * np.pi, 200)
+        ys = sin_func(xs, *popt)
+        plt.plot(xs, ys, color="red", label="Sine fit")
+    except Exception as e:
+        print(f"正弦拟合失败: {e}")
 
     xticks = [0, np.pi/2, np.pi, 3*np.pi/2, 2*np.pi]
     xtick_labels = ["0", r"$\pi/2$", r"$\pi$", r"$3\pi/2$", r"$2\pi$"]

@@ -1,4 +1,6 @@
 import pandas as pd
+import os
+from os.path import exists
 
 def keep_sample(df: pd.DataFrame, keep_samples: list = None):
     if keep_samples:
@@ -28,12 +30,36 @@ def delete_gene(df: pd.DataFrame, delete_genes: list = None):
         df = df[~df["Gene_Symbol"].isin(delete_genes)]
     return df
 
+def keep_celltype(df: pd.DataFrame, celltypes: list):
+    """
+    保留celltype_D行为指定celltype列表的列（除了Gene_Symbol）
+    """
+    if df.shape[0] < 2:
+        return df
+    base_cols = ['Gene_Symbol'] if 'Gene_Symbol' in df.columns else []
+    celltype_row = df.iloc[0]
+    celltype_cols = [col for col in df.columns[1:] if celltype_row[col] in celltypes]
+    cols = base_cols + celltype_cols
+    cols = [col for col in cols if col in df.columns]
+    return df[cols]
 
-csv_path = "Zhang_CancerCell_2025.Sample_SubCluster/expression.csv"
-saved_path = "Zhang_CancerCell_2025.Sample_SubCluster/expression_hat.csv"
+def delete_celltype(df: pd.DataFrame, celltypes: list):
+    """
+    删除celltype_D行为指定celltype列表的列（除了Gene_Symbol）
+    """
+    if df.shape[0] < 2:
+        return df
+    celltype_row = df.iloc[0]
+    celltype_cols = [col for col in df.columns[1:] if celltype_row[col] in celltypes]
+    celltype_cols = [col for col in celltype_cols if col != 'Gene_Symbol']
+    return df.drop(columns=celltype_cols, errors='ignore')
+
+
+csv_path = "HTAN_HTAPP/expression.csv"
+saved_path = "Filtered_HTAN_HTAPP_Macrophage_Fibroblast_MBC/expression.csv"
 if __name__ == "__main__":
-
-    df = pd.read_csv(csv_path)
-    # df = keep_gene(df, keep_genes=["CLOCK", "NFIL3", "ARNTL", "NPAS2", "NR1D1", "CRY1", "CRY2", "PER1", "PER2", "PER3"])
-    df = keep_sample(df, keep_samples=['P018_Post', 'P037_Pre', 'P025_Pre', 'P051_Pre', 'P023_Post', 'P039_Post', 'P045_Pre', 'P034_Post', 'P016_Pre', 'P045_Post', 'P019_Post', 'P060_Post', 'P016_Post', 'P047_Post', 'P057_Pre', 'P002_Post', 'P056_Post', 'P040_Pre', 'P012_Post', 'P052_Pre', 'P017_Pre', 'P018_Pre', 'P053_Pre', 'P049_Pre', 'P010_Pre', 'P059_Pre', 'P039_Pre', 'P058_Pre', 'P062_Pre', 'P061_Pre', 'P007_Pre', 'P031_Pre', 'P038_Pre', 'P040_Post', 'P054_Post', 'P019_Pre', 'P017_Post', 'P058_Post', 'P055_Pre', 'P032_Pre', 'P051_Post', 'P023_Pre', 'P002_Pre', 'P040-L_Pre', 'P044_Pre', 'P060_Pre', 'P047_Pre', 'P059_Post', 'P057_Post', 'P035_Pre', 'P046_Pre', 'P013_Pre', 'P037_Post', 'P038_Post', 'P003_Post', 'P025_Post', 'P043_Pre', 'P034_Pre', 'P042_Post', 'P013_Post', 'P041_Pre', 'P046_Post', 'P012_Pre', 'P042_Pre', 'P020_Pre', 'P052_Post', 'P005_Post', 'P041_Post', 'P005_Pre', 'P049_Post', 'P004_Pre', 'P022_Pre', 'P022_Post', 'P040-L_Post', 'P054_Pre', 'P053_Post', 'P056_Pre', 'P020_Post', 'P003_Pre', 'P021_Pre', 'P021_Post', 'P006_Pre', 'P006_Post', 'P035_Post', 'P048_Pre', 'P048_Post', 'P011_Pre', 'P011_Post', 'P024_Pre', 'P024_Post', 'P026_Pre', 'P026_Post', 'P027_Pre', 'P027_Post', 'P028_Pre', 'P028_Post', 'P029_Pre', 'P029_Post'])
+    if not exists(saved_path):
+        os.makedirs(os.path.dirname(saved_path), exist_ok=True)
+    df = pd.read_csv(csv_path, low_memory=False)
+    df = keep_celltype(df, celltypes=["Macrophage", "Fibroblast", "MBC"])
     df.to_csv(saved_path, index=False)

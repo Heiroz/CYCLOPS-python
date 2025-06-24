@@ -2,12 +2,12 @@ using DataFrames, Statistics, StatsBase, LinearAlgebra, MultivariateStats, PyPlo
 
 base_path = "/home/xuzhen/CYCLOPS-2.0"
 data_path = "/home/xuzhen/CYCLOPS-2.0/data/"
-dataset_path = "Zhang_CancerCell_2025.Sample_SubCluster"
+dataset_path = "Filtered_HTAN_HTAPP_Macrophage_Fibroblast_MBC"
 path_to_cyclops = joinpath(base_path, "CYCLOPS.jl")
 output_path = joinpath(base_path, "output")
 
-expression_data = CSV.read(joinpath(data_path, dataset_path, "expression_hat.csv"), DataFrame)
-seed_genes = readlines(joinpath(data_path, dataset_path, "seed_genes_hat.txt"))
+expression_data = CSV.read(joinpath(data_path, dataset_path, "expression.csv"), DataFrame)
+seed_genes = readlines(joinpath(data_path, dataset_path, "seed_genes.txt"))
 
 sample_ids_with_collection_times = [] # sample ids for which collection times exist
 sample_collection_times = [] # colletion times for sample ids

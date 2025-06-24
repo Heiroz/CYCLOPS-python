@@ -15,8 +15,8 @@ def get_seed_genes(expression_csv, output_txt, skip_covariates=True):
 
     gene_symbols.to_csv(output_txt, index=False, header=False)
 
-dataset_path = "Zhang_CancerCell_2025.Sample_SubCluster"
+dataset_path = "Filtered_HTAN_HTAPP_Macrophage_Fibroblast_MBC"
 if __name__ == "__main__":
-    csv_path = f"{dataset_path}/expression_hat.csv"
-    output_path = f"{dataset_path}/seed_genes_hat.txt"
+    csv_path = f"{dataset_path}/expression.csv"
+    output_path = f"{dataset_path}/seed_genes.txt"
     get_seed_genes(csv_path, output_path, skip_covariates=True)

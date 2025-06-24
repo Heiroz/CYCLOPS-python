@@ -22,12 +22,8 @@ env/
 *.user
 *.sln
 
-data/
-*.tsv
-*.csv
+data
 
-output/
-*.png
+output
 
-/
 *.sh
