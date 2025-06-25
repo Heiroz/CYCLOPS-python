@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # 定义数据集和结果路径
-DATASET="Filtered_HTAN_HTAPP"
-RESULT_PATH="Filtered_HTAN_HTAPP"
+DATASET="Kumar_Nature.Sample_MajorCluster"
+RESULT_PATH="Kumar_Nature.Sample_MajorCluster"
 
 
 

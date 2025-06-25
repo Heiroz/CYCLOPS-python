@@ -34,7 +34,7 @@ def split_by_celltype(base_path, celltype_col, output_dir):
         print(f"写入文件: {outname}")
 
 if __name__ == "__main__":
-    base_path = "Filtered_HTAN_HTAPP"
+    base_path = "Kumar_Nature.Sample_MajorCluster"
     celltype_col = "Covariate_D"
     output_dir = f"{base_path}/Fit_celltype"
 

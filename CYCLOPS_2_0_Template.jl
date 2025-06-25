@@ -2,7 +2,7 @@ using DataFrames, Statistics, StatsBase, LinearAlgebra, MultivariateStats, PyPlo
 
 base_path = "/home/xuzhen/CYCLOPS-2.0"
 data_path = "/home/xuzhen/CYCLOPS-2.0/data/"
-dataset_path = "Filtered_HTAN_HTAPP_Macrophage_Fibroblast_MBC"
+dataset_path = "Kumar_Nature.Sample_MajorCluster"
 path_to_cyclops = joinpath(base_path, "CYCLOPS.jl")
 output_path = joinpath(base_path, "output")
 
