@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # 定义数据集和结果路径
-DATASET="Kumar_Nature.Sample_MajorCluster"
-RESULT_PATH="Kumar_Nature.Sample_MajorCluster"
+DATASET="Murrow_Cell_systems_2022.mean"
+RESULT_PATH="Murrow_Cell_systems_2022.mean"
 
 
 
