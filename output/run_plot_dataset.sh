@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # 定义数据集和结果路径
-DATASET="Murrow_Cell_systems_2022.mean"
-RESULT_PATH="Murrow_Cell_systems_2022.mean"
+DATASET="Zhang_CancerCell_2025.Sample_MajorCluster"
+RESULT_PATH="Zhang_CancerCell"
 
 
 

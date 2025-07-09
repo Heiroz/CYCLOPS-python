@@ -86,8 +86,8 @@ function DefaultDict()
 	:align_batch_only => false,
 	# :align_genes => Array{String, 1},				# A string array of genes used to align CYCLOPS fit output. Goes together with :align_acrophases
 	# :align_acrophases => Array{<: Number, 1}, 	# A number array of acrophases for each gene used to align CYCLOPS fit output. Goes together with :align_genes
-	# :align_samples => Array{T, 1},				# Where T is either Bool—the length of the array is the same as the total number of samples in the data set–or Int—referring to index. Goes together with :align_phases
-	# :align_phases => Array{<: Number, 1}			# A number array of phases for each sample used to align CYCLOPS fit output. Goes together with :align_gsamples
+	:align_samples => Array{String, 1},				# Where T is either Bool—the length of the array is the same as the total number of samples in the data set–or Int—referring to index. Goes together with :align_phases
+	:align_phases => Array{<: Number, 1},			# A number array of phases for each sample used to align CYCLOPS fit output. Goes together with :align_gsamples
 
 	:X_Val_k => 10,									# How many folds used in cross validation.
 	:X_Val_omit_size => 0.1,						# What is the fraction of samples left out per fold
@@ -1635,7 +1635,9 @@ function BluntXthPercentile(original_dataFile_used::T, new_dataFile_to_use::T, o
 	if typeof(original_dataFile_used) == DataFrame
 		@debug "The original data file used is a dataframe. Extract the gene expression data from the dataframe."
 		data1 = MakeFloat(original_dataFile_used[options[:o_fxr]:end, 2:end])
+		println("Size of original data file is $(size(data1, 1)) rows and $(size(data1, 2)) columns.")
 		data2 = MakeFloat(new_dataFile_to_use[options[:o_fxr]:end, 2:end])
+		println("Size of new data file to use is $(size(data2, 1)) rows and $(size(data2, 2)) columns.")
 	end
 	@debug "Finding the number of genes/rows and samples/columns."
 	ngene, nsamples = size(data1)
@@ -1856,9 +1858,9 @@ function CovariateProcessing(dataFile1, dataFile2, options)
 		discCov1 = Array(dataFile1[discCovIndx, 2:end]) # select discontinuous covariate rows
 		discCov2 = Array(dataFile2[discCovIndx, 2:end]) # select discontinuous covariate rows
 		disc_cov_labels1 = mapslices(x -> [unique(x)], discCov1, dims = 2) # Find unique labels
-		disc_cov_labels2 = mapslices(x -> [unique(x)], discCov1, dims = 2) # Find unique labels
+		disc_cov_labels2 = mapslices(x -> [unique(x)], discCov2, dims = 2) # Find unique labels
 		disc_full_onehot1 = [Int.(onehotbatch(discCov1[ii, :], disc_cov_labels1[ii])) for ii in 1:size(discCov1, 1)] # Create Onehot
-		disc_full_onehot2 = [Int.(onehotbatch(discCov2[ii, :], disc_cov_labels1[ii])) for ii in 1:size(discCov2, 1)] # Create Onehot
+		disc_full_onehot2 = [Int.(onehotbatch(discCov2[ii, :], disc_cov_labels2[ii])) for ii in 1:size(discCov2, 1)] # Create Onehot
 		onehot_redundance_removed1 = map(x -> x[2:end, :], disc_full_onehot1)
 		onehot_redundance_removed2 = map(x -> x[2:end, :], disc_full_onehot2)
 		onehot_redundance_removed_transpose1 = map(x -> permutedims(x), onehot_redundance_removed1)
@@ -3725,7 +3727,7 @@ function Align(dataFile1::DataFrame, dataFile2::DataFrame, Fit_Output1::DataFram
 			axis([0, x_max, 0, 2pi])
 			grid(true)
 			known_sample_indices = findXinY(ops2[:align_samples], Fit_Output2.ID)
-			scatter(ops2[:align_phases], Fit_Output2.Phases_SA[known_sample_indices], s = 22)
+			# scatter(ops2[:align_phases], Fit_Output2.Phases_SA[known_sample_indices], s = 22)
 			my_info("SAVING FIGURE")
 			savefig(joinpath(plot_path_l, "Sample_Phases_Compared_To_Predicted_Phases_Plot_According_to_Prior_Dataset_$(todays_date).png"), bbox_inches = "tight", dpi = 300)
 			my_info("FIGURE SAVED. CLOSING FIGURE.")

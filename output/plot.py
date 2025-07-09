@@ -62,8 +62,8 @@ def compare(path_1, path_2, save_path):
     print(f"图像已保存到 {save_path_file}")
 
 
-path_1 = "Zhang_CancerCell_2025.Sample_MajorCluster"
-path_2 = "Filtered_CD4Tcell_CD8Tcell_0.5Bfoc_0.5CD16_0.5CD19B_0.5cDC_0.5pDC_0.5Plasma"
+path_1 = "Murrow_Cell_systems_2022.mean"
+path_2 = "Murrow_Cell_systems_2022.and.ZhangYY_CancerCell.pseudobulk"
 save_path = "plot"
 
 if __name__ == "__main__":

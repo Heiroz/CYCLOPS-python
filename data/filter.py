@@ -55,11 +55,11 @@ def delete_celltype(df: pd.DataFrame, celltypes: list):
     return df.drop(columns=celltype_cols, errors='ignore')
 
 
-csv_path = "HTAN_HTAPP/expression.csv"
-saved_path = "Filtered_HTAN_HTAPP_Macrophage_Fibroblast_MBC/expression.csv"
+csv_path = "rna5.Subclass_TimePoint/filtered_expression.csv"
+saved_path = "rna5.Subclass_TimePoint/filtered_expression.csv"
 if __name__ == "__main__":
     if not exists(saved_path):
         os.makedirs(os.path.dirname(saved_path), exist_ok=True)
     df = pd.read_csv(csv_path, low_memory=False)
-    df = keep_celltype(df, celltypes=["Macrophage", "Fibroblast", "MBC"])
+    df = keep_celltype(df, celltypes=['CD4Tcell', 'Bcell', 'Macro_Mono', 'CD8Tcell', 'NKcell'])
     df.to_csv(saved_path, index=False)

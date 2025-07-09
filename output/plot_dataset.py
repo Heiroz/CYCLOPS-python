@@ -75,7 +75,7 @@ def process_files(dataset, result_path, saved_path, gene):
             file_path = os.path.join(result_path, "Fit_celltype", file_name)
             print(f"处理文件: {file_name}")
             id_phase = load_fit_output(file_path)
-            expr_dict = load_expression_data(f"../data/{dataset}/expression.csv", gene)
+            expr_dict = load_expression_data(f"../data/{dataset}/filtered_expression.csv", gene)
             if expr_dict is None:
                 print(f"未找到基因 {gene}，跳过文件 {file_name}")
                 continue
