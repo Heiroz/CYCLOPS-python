@@ -22,8 +22,6 @@ env/
 *.user
 *.sln
 
-data
-
 output
 
 *.sh
