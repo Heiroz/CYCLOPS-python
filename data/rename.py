@@ -32,10 +32,10 @@ def rename_celltype_row(expression_path, output_path, rename_dict):
 expression_path = "rna5.Subclass_TimePoint/filtered_expression.csv"
 output_path = "rna5.Subclass_TimePoint/filtered_expression.csv"
 rename_dict = {
-    "B": "Bcell",
+    # "B": "Bcell",
     "CD4_T": "CD4Tcell",
-    "CD8_T": "CD8Tcell",
-    "NKT": "NKcell"
+    # "CD8_T": "CD8Tcell",
+    # "NKT": "NKcell"
 }
 
 rename_celltype_row(expression_path, output_path, rename_dict)

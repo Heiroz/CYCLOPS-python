@@ -61,5 +61,5 @@ if __name__ == "__main__":
     if not exists(saved_path):
         os.makedirs(os.path.dirname(saved_path), exist_ok=True)
     df = pd.read_csv(csv_path, low_memory=False)
-    df = keep_celltype(df, celltypes=['CD4Tcell', 'Bcell', 'Macro_Mono', 'CD8Tcell', 'NKcell'])
+    df = keep_celltype(df, celltypes=['CD4_T'])
     df.to_csv(saved_path, index=False)

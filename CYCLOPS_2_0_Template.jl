@@ -2,7 +2,7 @@ using DataFrames, Statistics, StatsBase, LinearAlgebra, MultivariateStats, PyPlo
 
 base_path = "/home/xuzhen/CYCLOPS-2.0"
 data_path = "/home/xuzhen/CYCLOPS-2.0/data/"
-dataset_path_1 = "rna5.Subclass_TimePoint"
+dataset_path_1 = "GSE233242"
 dataset_path_2 = "Zhang_CancerCell_2025.Sample_MajorCluster"
 path_to_cyclops = joinpath(base_path, "CYCLOPS.jl")
 output_path = joinpath(base_path, "output")
@@ -23,8 +23,8 @@ seed_genes = readlines(joinpath(data_path, dataset_path_1, "seed_genes.txt"))
 #                             2.617994,2.617994,5.759587,5.759587,
 #                             5.759587,5.759587,5.759587,4.188790,
 #                             4.188790,4.188790,4.188790,4.188790]
-sample_ids_with_collection_times = ["Sample_6"]
-sample_collection_times = [1.047198]
+sample_ids_with_collection_times = ["Sample_6", "Sample_16", "Sample_26", "Sample_34"]
+sample_collection_times = [1.047198, 2.617994, 5.759587, 4.188790]
 # println("Number of sample ids provided: ", length(sample_ids_with_collection_times))
 # println("Number of collection times provided: ", length(sample_collection_times))
 if ((length(sample_ids_with_collection_times)+length(sample_collection_times))>0) && (length(sample_ids_with_collection_times) != length(sample_collection_times))
@@ -83,8 +83,8 @@ training_parameters = Dict(:regex_cont => r".*_C",			# What is the regex match f
 :train_circular => false,						# Train symmetrically
 :train_collection_times => true,						# Train using known times
 :train_collection_time_balance => 1.0,					# How is the true time loss rescaled
-# :train_sample_id => sample_ids_with_collection_times,
-# :train_sample_phase => sample_collection_times,
+:train_sample_id => sample_ids_with_collection_times,
+:train_sample_phase => sample_collection_times,
 
 :cosine_shift_iterations => 192,				# How many different shifts are tried to find the ideal shift
 :cosine_covariate_offset => true,				# Are offsets calculated by covariates
@@ -119,9 +119,9 @@ Distributed.addprocs(length(Sys.cpu_info()))
 end
 
 # real training run
-training_parameters[:align_genes] = CYCLOPS.human_homologue_gene_symbol[CYCLOPS.human_homologue_gene_symbol .!= "RORC"]
-training_parameters[:align_acrophases] = CYCLOPS.mouse_acrophases[CYCLOPS.human_homologue_gene_symbol .!= "RORC"]
+# training_parameters[:align_genes] = CYCLOPS.human_homologue_gene_symbol[CYCLOPS.human_homologue_gene_symbol .!= "RORC"]
+# training_parameters[:align_acrophases] = CYCLOPS.mouse_acrophases[CYCLOPS.human_homologue_gene_symbol .!= "RORC"]
 eigendata, metricDataframe_1, correlationDataframe_1, bestmodel, dataFile1_ops = CYCLOPS.Fit(expression_data_1, seed_genes, training_parameters)
 CYCLOPS.Align(expression_data_1, metricDataframe_1, correlationDataframe_1, bestmodel, dataFile1_ops, output_path)
-# dataFile2_transform, metricDataframe_2, correlationDataframe_2, best_model, dataFile2_ops = CYCLOPS.ReApplyFit(bestmodel, expression_data_1, expression_data_2, seed_genes, training_parameters)
-# CYCLOPS.Align(expression_data_1, expression_data_2, metricDataframe_1, metricDataframe_2, correlationDataframe_2, bestmodel, dataFile1_ops, dataFile2_ops, output_path)
+dataFile2_transform, metricDataframe_2, correlationDataframe_2, best_model, dataFile2_ops = CYCLOPS.ReApplyFit(bestmodel, expression_data_1, expression_data_2, seed_genes, training_parameters)
+CYCLOPS.Align(expression_data_1, expression_data_2, metricDataframe_1, metricDataframe_2, correlationDataframe_2, bestmodel, dataFile1_ops, dataFile2_ops, output_path)

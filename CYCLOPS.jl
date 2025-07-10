@@ -9,8 +9,44 @@ export CosineFit # Currently named CYCLOPS_original_post_process_no_covariates a
 using DataFrames, Statistics, StatsBase, LinearAlgebra, MultivariateStats, Flux, PyPlot, Distributed, Random, CSV, Revise, Distributions, Dates, MultipleTesting
 import Flux: onehot, onehotbatch, mse
 
-const mouse_acrophases = [0, 0.0790637050481884, 0.151440116812406, 2.29555301890004, 2.90900605826091, 2.98706493493206, 2.99149022777511, 3.00769248308471, 3.1219769314524, 3.3058682224604, 3.31357155959037, 3.42557704861225, 3.50078722833753, 3.88658015146741, 4.99480367551318, 5.04951134876313, 6.00770260397838]
-const mouse_gene_symbol = ["Arntl", "Clock", "Npas2", "Nr1d1", "Bhlhe41", "Nr1d2", "Dbp", "Ciart", "Per1", "Per3", "Tef", "Hlf", "Cry2", "Per2", "Cry1", "Rorc", "Nfil3"]
+const mouse_acrophases = [
+	0, 
+	0.0790637050481884, 
+	0.151440116812406, 
+	2.29555301890004, 
+	2.90900605826091, 
+	2.98706493493206, 
+	2.99149022777511, 
+	3.00769248308471, 
+	3.1219769314524, 
+	3.3058682224604, 
+	3.31357155959037, 
+	3.42557704861225, 
+	3.50078722833753, 
+	3.88658015146741, 
+	4.99480367551318, 
+	5.04951134876313, 
+	6.00770260397838
+]
+const mouse_gene_symbol = [
+	"Arntl", 
+	"Clock", 
+	"Npas2", 
+	"Nr1d1", 
+	"Bhlhe41", 
+	"Nr1d2", 
+	"Dbp", 
+	"Ciart", 
+	"Per1", 
+	"Per3", 
+	"Tef", 
+	"Hlf", 
+	"Cry2", 
+	"Per2", 
+	"Cry1", 
+	"Rorc", 
+	"Nfil3"
+]
 const human_homologue_gene_symbol = uppercase.(mouse_gene_symbol)
 const subfolders = ["Plots", "Fits", "Models", "Parameters"]
 
@@ -112,7 +148,14 @@ function DefaultDict(alternateDict::Dict{Symbol, Any}; display_changes::Bool = f
 				println(""); @warn "Replacing existing key value: $(changes)$(show_change_made)."; println("");
 			end
 		else
-			additional_keys = [:align_genes, :align_acrophases, :align_samples, :align_phases, :train_sample_id, :train_sample_phase]
+			additional_keys = [
+				:align_genes, 
+				:align_acrophases, 
+				:align_samples, 
+				:align_phases, 
+				:train_sample_id, 
+				:train_sample_phase
+			]
 			if !in(changes, additional_keys)
 				println(""); throw(ArgumentError("$(changes) IS NOT A KEY KNOWN TO CYCLOPS. PLEASE REVISE OR REMOVE KEYS GIVEN IN alternateOps BEFORE PROCEEDING.")); println("");
 			end
@@ -1491,7 +1534,22 @@ function MultiTrainCovariates(m_array, gea::Array{Float32,2}, options)
 	trained_models = Array{Any}([])
 	gea_vectorized = mapslices(x -> [x], gea, dims = 1)[:]
 	if options[:train_circular]
-		append!(trained_models, pmap(x -> TrainCovariatesCircular(x, gea_vectorized, μA = options[:train_μA], β = options[:train_β], MinSteps = options[:train_min_steps], MaxSteps = options[:train_max_steps], cutoff = options[:train_μA_scale_lim]), m_array, on_error = e -> rethrow(e)))
+		append!(
+			trained_models, 
+			pmap(
+				x -> TrainCovariatesCircular(
+					x, 
+					gea_vectorized, 
+					μA = options[:train_μA], 
+					β = options[:train_β], 
+					MinSteps = options[:train_min_steps], 
+					MaxSteps = options[:train_max_steps], 
+					cutoff = options[:train_μA_scale_lim]
+				), 
+				m_array, 
+				on_error = e -> rethrow(e)
+			)
+		)
 	elseif haskey(options, :train_sample_id) & options[:train_collection_times]
 		known_sample_indices = findXinY(options[:train_sample_id], options[:o_column_ids])
 		init_collection_time = zeros(length(gea_vectorized))
@@ -1501,10 +1559,44 @@ function MultiTrainCovariates(m_array, gea::Array{Float32,2}, options)
 		init_collection_time[known_sample_indices] .= options[:train_sample_phase]
 		init_collection_time_flag = falses(length(init_collection_time))
 		init_collection_time_flag[known_sample_indices] .= true
-		collection_times_with_flag_vectorized = mapslices(x -> [Float32.(x)], hcat(init_collection_time_flag, init_collection_time)', dims = 1)[:]
-		append!(trained_models, pmap(x -> TrainCovariatesTrueTimes(x, gea_vectorized, collection_times_with_flag_vectorized, μA = options[:train_μA], β = options[:train_β], MinSteps = options[:train_min_steps], MaxSteps = options[:train_max_steps], cutoff = options[:train_μA_scale_lim], collection_time_balance = options[:train_collection_time_balance]), m_array, on_error = e -> rethrow(e))) # Error here leads to 449
+		collection_times_with_flag_vectorized = mapslices(
+			x -> [Float32.(x)], 
+			hcat(init_collection_time_flag, init_collection_time)', 
+			dims = 1)[:]
+		append!(
+			trained_models, 
+			pmap(
+				x -> TrainCovariatesTrueTimes(
+					x, 
+					gea_vectorized, 
+					collection_times_with_flag_vectorized, 
+					μA = options[:train_μA],
+					β = options[:train_β],
+					MinSteps = options[:train_min_steps],
+					MaxSteps = options[:train_max_steps], 
+					cutoff = options[:train_μA_scale_lim], 
+					collection_time_balance = options[:train_collection_time_balance]
+				), 
+				m_array, 
+				on_error = e -> rethrow(e)
+			)
+		) # Error here leads to 449
 	else
-		append!(trained_models, pmap(x -> TrainCovariates(x, gea_vectorized, μA = options[:train_μA], β = options[:train_β], MinSteps = options[:train_min_steps], MaxSteps = options[:train_max_steps], cutoff = options[:train_μA_scale_lim]), m_array))
+		append!(
+			trained_models, 
+			pmap(
+				x -> TrainCovariates(
+					x, 
+					gea_vectorized, 
+					μA = options[:train_μA], 
+					β = options[:train_β], 
+					MinSteps = options[:train_min_steps], 
+					MaxSteps = options[:train_max_steps], 
+					cutoff = options[:train_μA_scale_lim]
+				), 
+				m_array
+			)
+		)
 	end
 	return trained_models
 end
@@ -1512,7 +1604,21 @@ end
 function MultiTrainOrder(m_array, gea::Array{Float32,2}, options)
 	trained_models = Array{Any}([])
 	gea_vectorized = mapslices(x -> [x], gea, dims = 1)[:]
-	append!(trained_models, pmap(x -> TrainOrder(x, gea_vectorized, μA = options[:train_μA], β = options[:train_β], MinSteps = options[:train_min_steps], MaxSteps = options[:train_max_steps], cutoff = options[:train_μA_scale_lim]), m_array))
+	append!(
+		trained_models, 
+		pmap(
+			x -> TrainOrder(
+				x, 
+				gea_vectorized, 
+				μA = options[:train_μA], 
+				β = options[:train_β], 
+				MinSteps = options[:train_min_steps], 
+				MaxSteps = options[:train_max_steps], 
+				cutoff = options[:train_μA_scale_lim]
+			), 
+			m_array
+		)
+	)
 	return trained_models
 end
 
@@ -3488,7 +3594,13 @@ function AlignAcrophases(dataFile1::DataFrame, dataFile2::DataFrame, Fit_Output1
 	return shifted_sample_phases, shifted_cosine_output, Acrophase_Plot_Info_Array
 end
 
-function AlignAcrophases(dataFile::DataFrame, Fit_Output::DataFrame, ops::Dict{Symbol,Any}, align_genes::Array{String,1}, align_acrophases::Array{Float64,1})
+function AlignAcrophases(
+	dataFile::DataFrame, 
+	Fit_Output::DataFrame, 
+	ops::Dict{Symbol,Any}, 
+	align_genes::Array{String,1}, 
+	align_acrophases::Array{Float64,1}
+)
 	
 	goi_index = findXinY(align_genes, dataFile[:, 1]) # find the indices of the gene symbols of interest
 	# each_gene_how_many_times = map(x -> length(findXinY([x], dataFile[:, 1])), ops[:align_genes]) # find the number of replicates of each gene symbol of interest
@@ -3573,14 +3685,22 @@ function AlignAcrophases(dataFile::DataFrame, Fit_Output::DataFrame, ops::Dict{S
 	return shifted_sample_phases, shifted_cosine_output, Acrophase_Plot_Info_Array
 end
 
-function AlignSamples(dataFile2::DataFrame, Fit_Output1::DataFrame, Fit_Output2::DataFrame, ops1::Dict{Symbol,Any}, ops2::Dict{Symbol,Any}, align_samples::Array{String,1}, align_phases::Array{Float64,1})
+function AlignSamples(
+	dataFile2::DataFrame, 
+	Fit_Output1::DataFrame, 
+	Fit_Output2::DataFrame, 
+	ops1::Dict{Symbol,Any}, 
+	ops2::Dict{Symbol,Any}, 
+	align_samples::Array{String,1}, 
+	align_phases::Array{Float64,1}
+)
 	
 	known_sample_indices = findXinY(align_samples, ops1[:o_column_ids])
 
 	estimates_for_known_samples = Fit_Output1.Phase[known_sample_indices]
 
 	~, shifted_sample_phases = cosShift(estimates_for_known_samples, align_phases, Fit_Output2.Phase, ops1[:align_base])
-	
+
 	shifted_Cosine_Sample_output = CosineFit(shifted_sample_phases, dataFile2, ops2)
 
 	goi_index = findXinY(human_homologue_gene_symbol, dataFile2[ops2[:o_fxr]:end, 1]) # find the indices of the gene symbols of interest
@@ -3623,15 +3743,21 @@ function AlignSamples(dataFile2::DataFrame, Fit_Output1::DataFrame, Fit_Output2:
 	return shifted_sample_phases, shifted_Cosine_Sample_output, Acrophase_Plot_Info_Array
 end
 
-function AlignSamples(dataFile::DataFrame, Fit_Output::DataFrame, ops::Dict{Symbol,Any}, align_samples::Array{String,1}, align_phases::Array{Float64,1})
+function AlignSamples(
+	dataFile::DataFrame, 
+	Fit_Output::DataFrame, 
+	ops::Dict{Symbol,Any}, 
+	align_samples::Array{String,1}, 
+	align_phases::Array{Float64,1}
+)
 	
 	known_sample_indices = findXinY(align_samples, ops[:o_column_ids])
 	# println(known_sample_indices); println(length(known_sample_indices))
 	estimates_for_known_samples = Fit_Output.Phase[known_sample_indices]
 	# println(estimates_for_known_samples); println(length(estimates_for_known_samples))
-	# println(alignment_phases_for_samples); println(length(alignment_phases_for_samples))
+	# println(align_phases); println(length(align_phases))
 	~, shifted_sample_phases = cosShift(estimates_for_known_samples, align_phases, Fit_Output.Phase, ops[:align_base])
-
+	
 	shifted_Cosine_Sample_output = CosineFit(shifted_sample_phases, dataFile, ops)
 
 	goi_index = findXinY(human_homologue_gene_symbol, dataFile[ops[:o_fxr]:end, 1]) # find the indices of the gene symbols of interest
@@ -3762,7 +3888,14 @@ function Align(dataFile1::DataFrame, dataFile2::DataFrame, Fit_Output1::DataFram
 	return todays_date, all_subfolder_paths
 end
 
-function Align(dataFile::DataFrame, Fit_Output::DataFrame, Eigengene_Correlation::DataFrame, Model, ops::Dict, output_path::String)
+function Align(
+	dataFile::DataFrame, 
+	Fit_Output::DataFrame, 
+	Eigengene_Correlation::DataFrame, 
+	Model, 
+	ops::Dict, 
+	output_path::String
+)
 
 	todays_date, all_subfolder_paths = OutputFolders(output_path, ops)
 	(plot_path_l, fit_path_l, model_path_l, parameter_path_l) = all_subfolder_paths
@@ -3770,29 +3903,52 @@ function Align(dataFile::DataFrame, Fit_Output::DataFrame, Eigengene_Correlation
 	if haskey(ops, :align_genes) & haskey(ops, :align_acrophases)
 		my_info("ALIGNMENT ACROPHASES FOR GENES OTHER THAN MOUSE ATLAS GENES HAVE BEEN SPECIFIED.")
 		align_genes, align_acrophases = ops[:align_genes], ops[:align_acrophases]
-		Fit_Output[!, :Phases_AG], Align_Genes_Cosine_Fit, Acrophase_Plot_Info_Array = AlignAcrophases(dataFile, Fit_Output, ops, align_genes, align_acrophases)
+		Fit_Output[!, :Phases_AG], Align_Genes_Cosine_Fit, Acrophase_Plot_Info_Array = AlignAcrophases(
+			dataFile, 
+			Fit_Output, 
+			ops, 
+			align_genes, 
+			align_acrophases
+		)
 		if sum(Acrophase_Plot_Info_Array[end] .< 0.05) > 0
 			Acrophase(Acrophase_Plot_Info_Array..., 0.05, space_factor = pi/15)
 			title("Acrophase Alignment to Genes of Interest", pad = 32)
 			my_info("SAVING FIGURE.")
-			savefig(joinpath(plot_path_l, "Genes_of_Interest_Aligned_Acrophase_Plot_$(todays_date).png"), bbox_inches = "tight", dpi = 300)
+			savefig(
+				joinpath(plot_path_l, "Genes_of_Interest_Aligned_Acrophase_Plot_$(todays_date).png"), 
+				bbox_inches = "tight", 
+				dpi = 300
+			)
 			my_info("FIGURE SAVED. CLOSING FIGURE.")
 			close()
 			my_info("FIGURE CLOSED. SAVING COSINE FIT.")
 		end
-		CSV.write(joinpath(fit_path_l, "Genes_of_Interest_Aligned_Cosine_Fit_$(todays_date).csv"), Align_Genes_Cosine_Fit)
+		CSV.write(
+			joinpath(fit_path_l, "Genes_of_Interest_Aligned_Cosine_Fit_$(todays_date).csv"), 
+			Align_Genes_Cosine_Fit
+		)
 		my_info("COSINE FIT SAVED.")
 	end
 	
 	if haskey(ops, :align_samples) & haskey(ops, :align_phases)
 		my_info("ALIGNMENT PHASES FOR SAMPLES HAVE BEEN SPECIFIED.")
 		align_samples, align_phases = ops[:align_samples], ops[:align_phases]
-		Fit_Output[!, :Phases_SA], Align_Samples_Cosine_Fit, Acrophase_Plot_Info_Array = AlignSamples(dataFile, Fit_Output, ops, align_samples, align_phases)
+		Fit_Output[!, :Phases_SA], Align_Samples_Cosine_Fit, Acrophase_Plot_Info_Array = AlignSamples(
+			dataFile, 
+			Fit_Output, 
+			ops, 
+			align_samples, 
+			align_phases
+		)
 		if sum(Acrophase_Plot_Info_Array[end] .< 0.05) > 0
 			Acrophase(Acrophase_Plot_Info_Array..., 0.05, space_factor = pi/15)
 			title("Acrophase Alignment to Sample Phases", pad = 32)
 			my_info("SAVING FIGURE.")
-			savefig(joinpath(plot_path_l, "Sample_Phase_Aligned_Acrophase_Plot_$(todays_date).png"), bbox_inches = "tight", dpi = 300)
+			savefig(
+				joinpath(plot_path_l, "Sample_Phase_Aligned_Acrophase_Plot_$(todays_date).png"), 
+				bbox_inches = "tight", 
+				dpi = 300
+			)
 			my_info("FIGURE SAVED. CLOSING FIGURE.")
 			close()
 			my_info("FIGURE CLOSED.")
@@ -3826,13 +3982,23 @@ function Align(dataFile::DataFrame, Fit_Output::DataFrame, Eigengene_Correlation
 	my_info("ALIGNMENT TO MOUSE ATLAS ACROPHASES.")
 	align_genes, align_acrophases = human_homologue_gene_symbol, mouse_acrophases
 	if (length(findXinY(align_genes, dataFile[:, 1])) > 0)
-		Fit_Output[!, :Phases_MA], Align_Genes_Cosine_Fit, Acrophase_Plot_Info_Array = AlignAcrophases(dataFile, Fit_Output, ops, align_genes, align_acrophases)
+		Fit_Output[!, :Phases_MA], Align_Genes_Cosine_Fit, Acrophase_Plot_Info_Array = AlignAcrophases(
+			dataFile, 
+			Fit_Output, 
+			ops, 
+			align_genes, 
+			align_acrophases
+		)
 		
 		if sum(Acrophase_Plot_Info_Array[end] .< 0.05) > 0
 			Acrophase(Acrophase_Plot_Info_Array..., 0.05, space_factor = pi/15)
 			title("Acrophase Alignment to Mouse Atlas", pad = 32)
 			my_info("SAVING FIGURE.")
-			savefig(joinpath(plot_path_l, "Mouse_Atlas_Aligned_Acrophase_Plot_$(todays_date).png"), bbox_inches = "tight", dpi = 300)
+			savefig(
+				joinpath(plot_path_l, "Mouse_Atlas_Aligned_Acrophase_Plot_$(todays_date).png"), 
+				bbox_inches = "tight", 
+				dpi = 300
+			)
 			my_info("FIGURE SAVED. CLOSING FIGURE.")
 			close()
 			my_info("FIGURE CLOSED. SAVING COSINE FIT.")

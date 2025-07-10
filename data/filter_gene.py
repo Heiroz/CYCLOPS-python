@@ -29,8 +29,8 @@ def filter_genes(expression_path, genes_path, output_path):
 
 # 示例调用
 path = "rna5.Subclass_TimePoint"
-expression_path = f"{path}/expression.csv"
-genes_path = f"{path}/seed_genes.txt"
+expression_path = f"{path}/expression_UPPER.csv"
+genes_path = f"seed_genes.txt"
 output_path = f"{path}/filtered_expression.csv"
 
 filter_genes(expression_path, genes_path, output_path)
