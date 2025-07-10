@@ -2,7 +2,7 @@ using DataFrames, Statistics, StatsBase, LinearAlgebra, MultivariateStats, PyPlo
 
 base_path = "/home/xuzhen/CYCLOPS-2.0"
 data_path = "/home/xuzhen/CYCLOPS-2.0/data/"
-dataset_path_1 = "rna5.Subclass_TimePoint"
+dataset_path_1 = "Merge_rna5_ZhangYY"
 dataset_path_2 = "Zhang_CancerCell_2025.Sample_MajorCluster"
 path_to_cyclops = joinpath(base_path, "CYCLOPS.jl")
 output_path = joinpath(base_path, "output")
@@ -23,8 +23,16 @@ seed_genes = readlines(joinpath(data_path, "seed_genes.txt"))
 #                             2.617994,2.617994,5.759587,5.759587,
 #                             5.759587,5.759587,5.759587,4.188790,
 #                             4.188790,4.188790,4.188790,4.188790]
-sample_ids_with_collection_times = ["Sample_6", "Sample_16", "Sample_26", "Sample_34"]
-sample_collection_times = [1.047198, 2.617994, 5.759587, 4.188790]
+sample_ids_with_collection_times = ["Sample_6", "Sample_7",              "Sample_9",
+                                    "Sample_10",            "Sample_16","Sample_17",
+                                    "Sample_18","Sample_21","Sample_24","Sample_26",
+                                                "Sample_28","Sample_30","Sample_33",
+                                    "Sample_34","Sample_35",            "Sample_40"]
+sample_collection_times =  [1.047198,1.047198,         1.047198,
+                            1.047198,         2.617994,2.617994,
+                            2.617994,2.617994,5.759587,5.759587,
+                                     5.759587,5.759587,4.188790,
+                            4.188790,4.188790,         4.188790]
 # println("Number of sample ids provided: ", length(sample_ids_with_collection_times))
 # println("Number of collection times provided: ", length(sample_collection_times))
 if ((length(sample_ids_with_collection_times)+length(sample_collection_times))>0) && (length(sample_ids_with_collection_times) != length(sample_collection_times))
