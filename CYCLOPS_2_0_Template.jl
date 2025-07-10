@@ -9,7 +9,7 @@ output_path = joinpath(base_path, "output")
 
 expression_data_1 = CSV.read(joinpath(data_path, dataset_path_1, "filtered_expression.csv"), DataFrame)
 expression_data_2 = CSV.read(joinpath(data_path, dataset_path_2, "filtered_expression.csv"), DataFrame)
-seed_genes = readlines(joinpath(data_path, dataset_path_1, "seed_genes.txt"))
+seed_genes = readlines(joinpath(data_path, "seed_genes.txt"))
 
 # Ensure unique sample IDs by appending .1, .2, etc. for duplicates
 # sample_ids_with_collection_times = ["Sample_6","Sample_7","Sample_8","Sample_9",
@@ -119,8 +119,8 @@ Distributed.addprocs(length(Sys.cpu_info()))
 end
 
 # real training run
-# training_parameters[:align_genes] = CYCLOPS.human_homologue_gene_symbol[CYCLOPS.human_homologue_gene_symbol .!= "RORC"]
-# training_parameters[:align_acrophases] = CYCLOPS.mouse_acrophases[CYCLOPS.human_homologue_gene_symbol .!= "RORC"]
+training_parameters[:align_genes] = CYCLOPS.human_homologue_gene_symbol[CYCLOPS.human_homologue_gene_symbol .!= "RORC"]
+training_parameters[:align_acrophases] = CYCLOPS.mouse_acrophases[CYCLOPS.human_homologue_gene_symbol .!= "RORC"]
 eigendata, metricDataframe_1, correlationDataframe_1, bestmodel, dataFile1_ops = CYCLOPS.Fit(expression_data_1, seed_genes, training_parameters)
 CYCLOPS.Align(expression_data_1, metricDataframe_1, correlationDataframe_1, bestmodel, dataFile1_ops, output_path)
 dataFile2_transform, metricDataframe_2, correlationDataframe_2, best_model, dataFile2_ops = CYCLOPS.ReApplyFit(bestmodel, expression_data_1, expression_data_2, seed_genes, training_parameters)
