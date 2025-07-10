@@ -2711,12 +2711,18 @@ end
 function ReApplyFit(trainedModel, dataFile1, dataFile2, genesOfInterest, ops; _verbose=false, matching_symbols=true)
 	
 	options = DefaultDict(ops)
-	(dataFile1_transform, dataFile1_ops), (dataFile2_transform, dataFile2_ops) = Eigengenes!(dataFile1, dataFile2, genesOfInterest, options, matching_symbols)
+	(dataFile1_transform, dataFile1_ops), (dataFile2_transform, dataFile2_ops) = Eigengenes!(
+		dataFile1, 
+		dataFile2, 
+		genesOfInterest, 
+		options, 
+		matching_symbols
+	)
 
 	no_covariates = (size(dataFile2_transform, 1) == dataFile2_ops[:o_svd_n_dims])
 
 	if no_covariates
-		best_model, output_phases = OrderDecoder([trainedModel], dataFile2_transform)
+		best_model, metric_array = OrderDecoder(trainedModel, dataFile2_transform)
 		output_overall_mses = Array{Float32, 1}(reshape(mapslices(x -> mse(trainedModel(x), x[1:trainedModel.o]), dataFile2_transform, dims = 1), :, 1)[:, 1])
 		output_projections = OrderProjection(trainedModel, dataFile2_transform)
 		output_magnitudes = OrderMagnitude(trainedModel, dataFile2_transform)
@@ -3801,7 +3807,17 @@ function AlignSamples(
 	return shifted_sample_phases, shifted_Cosine_Sample_output, Acrophase_Plot_Info_Array
 end
 
-function Align(dataFile1::DataFrame, dataFile2::DataFrame, Fit_Output1::DataFrame, Fit_Output2::DataFrame, Eigengene_Correlation2::DataFrame, Model::Covariates, ops1::Dict{Symbol,Any}, ops2::Dict{Symbol,Any}, output_path::String)
+function Align(
+	dataFile1::DataFrame, 
+	dataFile2::DataFrame, 
+	Fit_Output1::DataFrame, 
+	Fit_Output2::DataFrame, 
+	Eigengene_Correlation2::DataFrame, 
+	Model, 
+	ops1::Dict{Symbol,Any}, 
+	ops2::Dict{Symbol,Any}, 
+	output_path::String
+)
 	
 	todays_date, all_subfolder_paths = OutputFolders(output_path, ops2)
 	(plot_path_l, fit_path_l, model_path_l, parameter_path_l) = all_subfolder_paths
@@ -3809,7 +3825,16 @@ function Align(dataFile1::DataFrame, dataFile2::DataFrame, Fit_Output1::DataFram
 	if haskey(ops1, :align_genes) & haskey(ops1, :align_acrophases)
 		my_info("ALIGNMENT ACROPHASES FOR GENES OTHER THAN MOUSE ATLAS GENES HAVE BEEN SPECIFIED.")
 		align_genes, align_acrophases = ops2[:align_genes], ops2[:align_acrophases]
-		Fit_Output2[!, :Phases_AG], Align_Genes_Cosine_Fit, Acrophase_Plot_Info_Array = AlignAcrophases(dataFile1, dataFile2, Fit_Output1, Fit_Output2, ops1, ops2, align_genes, align_acrophases)
+		Fit_Output2[!, :Phases_AG], Align_Genes_Cosine_Fit, Acrophase_Plot_Info_Array = AlignAcrophases(
+			dataFile1, 
+			dataFile2, 
+			Fit_Output1, 
+			Fit_Output2, 
+			ops1, 
+			ops2, 
+			align_genes, 
+			align_acrophases
+		)
 		if sum(Acrophase_Plot_Info_Array[end] .< 0.05) > 0
 			Acrophase(Acrophase_Plot_Info_Array..., 0.05, space_factor = pi/15)
 			title("Acrophase Alignment to Genes of Interest According to Prior Dataset", pad = 32)

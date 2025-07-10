@@ -2,7 +2,7 @@
 
 # 定义数据集和结果路径
 DATASET="Zhang_CancerCell_2025.Sample_MajorCluster"
-RESULT_PATH="Zhang_CancerCell"
+RESULT_PATH="train_rna5_test_ZhangYY"
 
 
 
