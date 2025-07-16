@@ -122,8 +122,8 @@ function DefaultDict()
 	:align_batch_only => false,
 	# :align_genes => Array{String, 1},				# A string array of genes used to align CYCLOPS fit output. Goes together with :align_acrophases
 	# :align_acrophases => Array{<: Number, 1}, 	# A number array of acrophases for each gene used to align CYCLOPS fit output. Goes together with :align_genes
-	:align_samples => Array{String, 1},				# Where T is either Bool—the length of the array is the same as the total number of samples in the data set–or Int—referring to index. Goes together with :align_phases
-	:align_phases => Array{<: Number, 1},			# A number array of phases for each sample used to align CYCLOPS fit output. Goes together with :align_gsamples
+	# :align_samples => Array{String, 1},				# Where T is either Bool—the length of the array is the same as the total number of samples in the data set–or Int—referring to index. Goes together with :align_phases
+	# :align_phases => Array{<: Number, 1},			# A number array of phases for each sample used to align CYCLOPS fit output. Goes together with :align_gsamples
 
 	:X_Val_k => 10,									# How many folds used in cross validation.
 	:X_Val_omit_size => 0.1,						# What is the fraction of samples left out per fold

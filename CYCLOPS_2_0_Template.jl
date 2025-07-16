@@ -2,7 +2,7 @@ using DataFrames, Statistics, StatsBase, LinearAlgebra, MultivariateStats, PyPlo
 
 base_path = "/home/xuzhen/CYCLOPS-2.0"
 data_path = "/home/xuzhen/CYCLOPS-2.0/data/"
-dataset_path_1 = "Merge_rna5_ZhangYY"
+dataset_path_1 = "Merge_GSE_ZhangYY"
 dataset_path_2 = "Zhang_CancerCell_2025.Sample_MajorCluster"
 path_to_cyclops = joinpath(base_path, "CYCLOPS.jl")
 output_path = joinpath(base_path, "output")
@@ -23,16 +23,20 @@ seed_genes = readlines(joinpath(data_path, "seed_genes.txt"))
 #                             2.617994,2.617994,5.759587,5.759587,
 #                             5.759587,5.759587,5.759587,4.188790,
 #                             4.188790,4.188790,4.188790,4.188790]
-sample_ids_with_collection_times = ["Sample_6", "Sample_7",              "Sample_9",
-                                    "Sample_10",            "Sample_16","Sample_17",
-                                    "Sample_18","Sample_21","Sample_24","Sample_26",
-                                                "Sample_28","Sample_30","Sample_33",
-                                    "Sample_34","Sample_35",            "Sample_40"]
-sample_collection_times =  [1.047198,1.047198,         1.047198,
-                            1.047198,         2.617994,2.617994,
-                            2.617994,2.617994,5.759587,5.759587,
-                                     5.759587,5.759587,4.188790,
-                            4.188790,4.188790,         4.188790]
+# sample_ids_with_collection_times = ["Sample_6", "Sample_7",              "Sample_9",
+#                                     "Sample_10",            "Sample_16","Sample_17",
+#                                     "Sample_18","Sample_21","Sample_24","Sample_26",
+#                                                 "Sample_28","Sample_30","Sample_33",
+#                                     "Sample_34","Sample_35",            "Sample_40"]
+# sample_collection_times =  [1.047198,1.047198,         1.047198,
+#                             1.047198,         2.617994,2.617994,
+#                             2.617994,2.617994,5.759587,5.759587,
+#                                      5.759587,5.759587,4.188790,
+#                             4.188790,4.188790,         4.188790]
+# sample_ids_with_collection_times = ["Sample_6", "Sample_16", "Sample_26", "Sample_34"]
+# sample_collection_times = [1.047198, 2.617994, 5.759587, 4.188790]
+sample_ids_with_collection_times = ["SL01", "SL03", "SL05", "SL07", "SL09", "SL11", "SL13", "SL15", "SL17", "SL21", "SL23", "SL25", "SL27", "SL29", "SL31", "SL33", "SL35", "SL37", "SL39", "SL41", "SL43", "SL45", "SL47", "SL49", "SL51", "SL53", "SL55", "SL57", "SL59", "SL61", "SL63", "SL65", "SL67", "SL69", "SL71", "SL73", "SL75", "SL77", "SL79", "SL81", "SL83", "SL85"]
+sample_collection_times = [3.839724, 3.621558, 3.054326, 2.683444, 4.166974, 3.953171, 3.141593, 3.207043, 4.276057, 4.38514, 4.232423, 2.792527, 3.621558, 3.403392, 3.621558, 2.958333, 3.926991, 4.494223, 4.145157, 3.337942, 3.119776, 2.853613, 3.381575, 2.814343, 3.381575, 4.014257, 4.363323, 2.727077, 4.101524, 3.076143, 3.468842, 4.180064, 4.341507, 4.210607, 3.272492, 4.166974, 3.447025, 3.621558, 3.228859, 2.63981, 4.38514, 4.46368]
 # println("Number of sample ids provided: ", length(sample_ids_with_collection_times))
 # println("Number of collection times provided: ", length(sample_collection_times))
 if ((length(sample_ids_with_collection_times)+length(sample_collection_times))>0) && (length(sample_ids_with_collection_times) != length(sample_collection_times))
@@ -65,7 +69,7 @@ training_parameters = Dict(:regex_cont => r".*_C",			# What is the regex match f
 :eigen_total_var => 0.85, 						# Minimum amount of variance required to be captured by included dimensions of eigen gene data
 :eigen_contr_var => 0.05, 						# Minimum amount of variance required to be captured by a single dimension of eigen gene data
 :eigen_var_override => true,					# Is the minimum amount of contributed variance ignored
-:eigen_max => 5, 								# Maximum number of dimensions allowed to be kept in eigen gene data
+:eigen_max => 10, 								# Maximum number of dimensions allowed to be kept in eigen gene data
 
 :out_covariates => true, 						# Are covariates included in eigen gene data
 :out_use_disc_cov => true,						# Are discontinuous covariates included in eigen gene data
@@ -91,8 +95,8 @@ training_parameters = Dict(:regex_cont => r".*_C",			# What is the regex match f
 :train_circular => false,						# Train symmetrically
 :train_collection_times => true,						# Train using known times
 :train_collection_time_balance => 1.0,					# How is the true time loss rescaled
-:train_sample_id => sample_ids_with_collection_times,
-:train_sample_phase => sample_collection_times,
+# :train_sample_id => sample_ids_with_collection_times,
+# :train_sample_phase => sample_collection_times,
 
 :cosine_shift_iterations => 192,				# How many different shifts are tried to find the ideal shift
 :cosine_covariate_offset => true,				# Are offsets calculated by covariates
@@ -133,3 +137,6 @@ eigendata, metricDataframe_1, correlationDataframe_1, bestmodel, dataFile1_ops =
 CYCLOPS.Align(expression_data_1, metricDataframe_1, correlationDataframe_1, bestmodel, dataFile1_ops, output_path)
 dataFile2_transform, metricDataframe_2, correlationDataframe_2, best_model, dataFile2_ops = CYCLOPS.ReApplyFit(bestmodel, expression_data_1, expression_data_2, seed_genes, training_parameters)
 CYCLOPS.Align(expression_data_1, expression_data_2, metricDataframe_1, metricDataframe_2, correlationDataframe_2, bestmodel, dataFile1_ops, dataFile2_ops, output_path)
+
+# eigendata, metricDataframe, correlationDataframe, bestmodel, dataFile_ops = CYCLOPS.Fit(expression_data_2, seed_genes, training_parameters)
+# CYCLOPS.Align(expression_data_2, metricDataframe, correlationDataframe, bestmodel, dataFile_ops, output_path)
