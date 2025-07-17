@@ -3,7 +3,7 @@ using DataFrames, Statistics, StatsBase, LinearAlgebra, MultivariateStats, PyPlo
 base_path = "/home/xuzhen/CYCLOPS-2.0"
 data_path = "/home/xuzhen/CYCLOPS-2.0/data/"
 dataset_path_1 = "Merge_rna5_ZhangYY"
-dataset_path_2 = "Zhang_CancerCell_2025.Sample_MajorCluster"
+dataset_path_2 = "Zhang_CancerCell_2025_CD4"
 path_to_cyclops = joinpath(base_path, "CYCLOPS.jl")
 output_path = joinpath(base_path, "output")
 
@@ -136,5 +136,5 @@ training_parameters[:align_acrophases] = CYCLOPS.mouse_acrophases[CYCLOPS.human_
 # dataFile2_transform, metricDataframe_2, correlationDataframe_2, best_model, dataFile2_ops = CYCLOPS.ReApplyFit(bestmodel, expression_data_1, expression_data_2, seed_genes, training_parameters)
 # CYCLOPS.Align(expression_data_1, expression_data_2, metricDataframe_1, metricDataframe_2, correlationDataframe_2, bestmodel, dataFile1_ops, dataFile2_ops, output_path)
 
-eigendata, metricDataframe, correlationDataframe, bestmodel, dataFile_ops = CYCLOPS.Fit(expression_data_1, seed_genes, training_parameters)
-CYCLOPS.Align(expression_data_1, metricDataframe, correlationDataframe, bestmodel, dataFile_ops, output_path)
+eigendata, metricDataframe, correlationDataframe, bestmodel, dataFile_ops = CYCLOPS.Fit(expression_data_2, seed_genes, training_parameters)
+CYCLOPS.Align(expression_data_2, metricDataframe, correlationDataframe, bestmodel, dataFile_ops, output_path)
