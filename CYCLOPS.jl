@@ -8,7 +8,8 @@ export CosineFit # Currently named CYCLOPS_original_post_process_no_covariates a
 
 using DataFrames, Statistics, StatsBase, LinearAlgebra, MultivariateStats, Flux, PyPlot, Distributed, Random, CSV, Revise, Distributions, Dates, MultipleTesting
 import Flux: onehot, onehotbatch, mse
-
+hidden_dim1 = 64
+hidden_dim2 = 64
 const mouse_acrophases = [
 	0, 
 	0.0790637050481884, 
@@ -241,22 +242,14 @@ struct Order
 end
 
 struct Covariates
-	S_OH	# Scaling factor for OH (encoding). Trainable
-	B		# Bias factor applied to all data. Trainable
-	B_OH	# Bias factor for OH (encoding). Trainable
-	L1  	# First linear layer (Dense). Reduced to at least 2 layers for the circ layer but can be reduced to only 3 to add one linear/non-linear layer. L1.W & L1.b are trainable
-	# C   	# Circular layer (circ(x)). Non-trainable paremeter
-	L2  	# Second linear layer (Dense). Takes output from circ and any additional linear layers and expands to number of eigengenes. L2.W & L2.b are trainable
-	o   	# output dimensions (out). Non-trainable parameter
-end
-
-struct Covariates
-	S_OH	
-	B		
-	B_OH	
-	L1  	
-	L2  	
-	o   	
+    S_OH	
+    B		
+    B_OH	
+    L1
+    L2
+    L3
+    L4
+    o   	
 end
 
 struct SimpleCovariates
@@ -291,19 +284,16 @@ end
 function OrderEncodingDense(x)
 	return m.L1(x)
 end
-#=
-function Order
-end
-=#
-# Currently in Use for Single Module
 
 function (m::Covariates)(x::Array{Float32,1})
     Encoding_Onehot = x[1:m.o] .* (1 .+ (m.S_OH * x[m.o + 1:end])) .+ (m.B_OH * x[m.o + 1:end]) .+ m.B
-    Fully_Connected_Encoding = m.L1(Encoding_Onehot)
-	Cicular_Layer = CircularNode(Fully_Connected_Encoding)
-	Fully_Connected_Decoding = m.L2(Cicular_Layer)
-	Decoding_Onehot = ((Fully_Connected_Decoding .- (m.B_OH * x[m.o + 1:end]) .- m.B) ./ (1 .+ (m.S_OH * x[m.o + 1:end])))
-	return Decoding_Onehot
+    Layer1 = relu.(m.L1(Encoding_Onehot))
+    Layer2 = m.L2(Layer1)
+	Circular_Layer = CircularNode(Layer2)
+    Layer3 = relu.(m.L3(Circular_Layer))
+    Fully_Connected_Decoding = m.L4(Layer3)
+    Decoding_Onehot = ((Fully_Connected_Decoding .- (m.B_OH * x[m.o + 1:end]) .- m.B) ./ (1 .+ (m.S_OH * x[m.o + 1:end])))
+    return Decoding_Onehot
 end
 
 function (m::Covariates)(x::Array{Float32,2})
@@ -317,18 +307,7 @@ end
 function (m::Covariates)(x::Array{Array{Float32,1},2})
 	return map(y::Array{Float32,1} -> [m(y)], x[:])
 end
-#=
-function(m::Covariates)(x)
-	# local m
-	# global m
-	Encoding_Onehot = CovariatesEncodingOH(x)
-	Encoding_Dense_Layer = CovariatesEncodingDense(Encoding_Onehot)
-	Circular_Layer = CircularNode(Encoding_Dense_Layer)
-	Decoding_Dense_Layer = CovariatesDecodingDense(Circular_Layer)
-	Decoding_Onehot = CovariatesDecodingOH(x, Decoding_Dense_Layer)
-	return Decoding_Onehot
-end
-=#
+
 function CovariatesEncodingOH(x::Array{Float32,1}, m::Covariates)
 	return x[1:m.o] .* (1 .+ (m.S_OH * x[m.o + 1:end])) .+ (m.B_OH * x[m.o + 1:end]) .+ m.B
 end
@@ -386,7 +365,9 @@ function CovariatesDecodingOH(x::Array{Array{Float32,1}, 2}, y::Array{Float32,2}
 end
 
 function CovariatesEncodingDense(x::Array{Float32,1}, m::Covariates)
-	return m.L1(x)
+	layer_1 = relu.(m.L1(x))
+	layer_2 = m.L2(layer_1)
+	return layer_2
 end
 
 function CovariatesEncodingDense(x::Array{Float32,2}, m::Covariates)
@@ -402,7 +383,8 @@ function CovariatesEncodingDense(x::Array{Array{Float32,1},1}, m::Covariates)
 end
 
 function CovariatesDecodingDense(x::Array{Float32,1}, m::Covariates)
-	return m.L2(x)
+	layer_3 = relu.(m.L3(x))
+	return m.L4(layer_3)
 end
 
 function CovariatesDecodingDense(x::Array{Float32,2}, m::Covariates)
@@ -869,9 +851,17 @@ function InitializeModel(eigen_data, options)
 			use_S_OH = rand(size(options[:S_OH])...) .* options[:S_OH]
 			use_B = rand(size(B)...) .* B
 			use_B_OH = rand(size(B_OH)...) .* B_OH
-			append!(output_models, [Covariates(Array{Float32}(use_S_OH), Array{Float32}(use_B), Array{Float32}(use_B_OH), Dense(options[:o_svd_n_dims], 2), Dense(2, options[:o_svd_n_dims]), options[:o_svd_n_dims])])
+			append!(output_models, [Covariates(
+										Array{Float32}(use_S_OH), 
+										Array{Float32}(use_B), 
+										Array{Float32}(use_B_OH), 
+										Dense(options[:o_svd_n_dims], hidden_dim1),
+										Dense(hidden_dim1, 2),
+										Dense(2, hidden_dim2),
+										Dense(hidden_dim2, options[:o_svd_n_dims]),
+										options[:o_svd_n_dims]
+									)])
 		end
-		# output_models = [Covariates(Array{Float32}(use_S_OH), Array{Float32}(use_B), Array{Float32}(use_B_OH), Dense(options[:o_svd_n_dims], 2), CircularNode, Dense(2, options[:o_svd_n_dims]), options[:o_svd_n_dims]) for ii in 1:options[:train_n_models]] # soon to be depricated
 		return output_models
 	end
 end
@@ -887,9 +877,9 @@ function Decoder(data_matrix, model, n_circs::Integer)
     for c in 1:n_circs # how many circular bottleneck layers are there (usually 1)
         for n in 1:points # for each sample
             pos = model(data_matrix[:, n]) # pos is a 2 element array
-            phases[c, n] = atan(pos[2 + base], pos[1 + base])# the inverse tangent of the model output is an angle, stored to phases
+            phases[c, n] = atan(pos[2 + base], pos[1 + base])
         end
-        base += 2 # move to next circular layer (will in a future version be replaced by map())
+        base += 2
     end
 	output_phases = mod.(vec(phases), 2π)
 	return output_phases
@@ -957,8 +947,8 @@ function CovariatesDecoder(trained_models_and_errors::Array{Any, 1}, gea::Array{
 	decoding_dense_magnitudes = CovariatesDecodingDenseMagnitude(gea, best_model) # sqrt(sum(E^2))
 	decoding_eigenspace_magnitudes = sqrtsumofsquares(gea, best_model) # sqrt(sum(F^2))
 	
-	decoding_dense_skip_circle_magnitudes = CovariatesSkipCircularNodeDecodingDenseMagnitude(gea, best_model) # sqrt(sum(E_b^2))
-	decoding_OH_skip_circle_magnitudes = CovariatesSkipCircularNodeDecodingOHMagnitude(gea, best_model) # sqrt(sum(F_b^2))
+	decoding_dense_skip_circle_magnitudes = CovariatesSkipCircularNodeDecodingDenseMagnitude(gea, best_model)
+	decoding_OH_skip_circle_magnitudes = CovariatesSkipCircularNodeDecodingOHMagnitude(gea, best_model)
 	
 	projections = vcat(permutedims.(CovariatesThroughEncodingDense(gea, best_model))...)
 	phases = CovariatesPhase(gea, best_model)
@@ -972,7 +962,24 @@ function CovariatesDecoder(trained_models_and_errors::Array{Any, 1}, gea::Array{
 	out_of_plane_errors = get_out_of_plane_error(gea, best_model)
 	out_of_plane_reconstruction_errors = get_out_of_plane_reconstruction_error(gea, best_model)
 
-	return best_model, hcat(phases, model_errors, magnitudes, projections, inner_errors, circ_errors, skip_circle_inner_errors, skip_circle_errors, out_of_plane_errors, out_of_plane_reconstruction_errors, eigenspace_magnitudes, encoding_dense_magnitudes, decoding_dense_magnitudes, decoding_eigenspace_magnitudes, decoding_dense_skip_circle_magnitudes, decoding_OH_skip_circle_magnitudes)
+	return best_model, hcat(
+		phases, 
+		model_errors, 
+		magnitudes, 
+		projections, 
+		inner_errors, 
+		circ_errors, 
+		skip_circle_inner_errors, 
+		skip_circle_errors, 
+		out_of_plane_errors, 
+		out_of_plane_reconstruction_errors, 
+		eigenspace_magnitudes, 
+		encoding_dense_magnitudes, 
+		decoding_dense_magnitudes, 
+		decoding_eigenspace_magnitudes, 
+		decoding_dense_skip_circle_magnitudes, 
+		decoding_OH_skip_circle_magnitudes
+	)
 end
 
 function CovariatesDecoder(best_model, gea::Array{Float32,2}, OUT_TYPE = Float64)

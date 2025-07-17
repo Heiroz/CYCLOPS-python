@@ -67,7 +67,7 @@ training_parameters = Dict(:regex_cont => r".*_C",			# What is the regex match f
 :eigen_total_var => 0.85, 						# Minimum amount of variance required to be captured by included dimensions of eigen gene data
 :eigen_contr_var => 0.05, 						# Minimum amount of variance required to be captured by a single dimension of eigen gene data
 :eigen_var_override => true,					# Is the minimum amount of contributed variance ignored
-:eigen_max => 10, 								# Maximum number of dimensions allowed to be kept in eigen gene data
+:eigen_max => 5, 								# Maximum number of dimensions allowed to be kept in eigen gene data
 
 :out_covariates => true, 						# Are covariates included in eigen gene data
 :out_use_disc_cov => true,						# Are discontinuous covariates included in eigen gene data
@@ -136,5 +136,5 @@ training_parameters[:align_acrophases] = CYCLOPS.mouse_acrophases[CYCLOPS.human_
 # dataFile2_transform, metricDataframe_2, correlationDataframe_2, best_model, dataFile2_ops = CYCLOPS.ReApplyFit(bestmodel, expression_data_1, expression_data_2, seed_genes, training_parameters)
 # CYCLOPS.Align(expression_data_1, expression_data_2, metricDataframe_1, metricDataframe_2, correlationDataframe_2, bestmodel, dataFile1_ops, dataFile2_ops, output_path)
 
-eigendata, metricDataframe, correlationDataframe, bestmodel, dataFile_ops = CYCLOPS.Fit(expression_data_2, seed_genes, training_parameters)
-CYCLOPS.Align(expression_data_2, metricDataframe, correlationDataframe, bestmodel, dataFile_ops, output_path)
+eigendata, metricDataframe, correlationDataframe, bestmodel, dataFile_ops = CYCLOPS.Fit(expression_data_1, seed_genes, training_parameters)
+CYCLOPS.Align(expression_data_1, metricDataframe, correlationDataframe, bestmodel, dataFile_ops, output_path)
