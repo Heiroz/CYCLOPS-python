@@ -3,7 +3,7 @@ using DataFrames, Statistics, StatsBase, LinearAlgebra, MultivariateStats, PyPlo
 base_path = "/home/xuzhen/CYCLOPS-2.0"
 data_path = "/home/xuzhen/CYCLOPS-2.0/data/"
 dataset_path_1 = "Merge_rna5_ZhangYY"
-dataset_path_2 = "Zhang_CancerCell_2025_CD4"
+dataset_path_2 = "Zhang_CancerCell_2025.Sample_MajorCluster"
 path_to_cyclops = joinpath(base_path, "CYCLOPS.jl")
 output_path = joinpath(base_path, "output")
 
@@ -23,22 +23,24 @@ seed_genes = readlines(joinpath(data_path, "seed_genes.txt"))
 #                             2.617994,2.617994,5.759587,5.759587,
 #                             5.759587,5.759587,5.759587,4.188790,
 #                             4.188790,4.188790,4.188790,4.188790]
-# sample_ids_with_collection_times = ["Sample_6", "Sample_7",              "Sample_9",
-#                                     "Sample_10",            "Sample_16","Sample_17",
-#                                     "Sample_18","Sample_21","Sample_24","Sample_26",
-#                                                 "Sample_28","Sample_30","Sample_33",
-#                                     "Sample_34","Sample_35",            "Sample_40"]
-# sample_collection_times =  [1.047198,1.047198,         1.047198,
-#                             1.047198,         2.617994,2.617994,
-#                             2.617994,2.617994,5.759587,5.759587,
-#                                      5.759587,5.759587,4.188790,
-#                             4.188790,4.188790,         4.188790]
+sample_ids_with_collection_times = ["Sample_6", "Sample_7",              "Sample_9",
+                                    "Sample_10",            "Sample_16","Sample_17",
+                                    "Sample_18","Sample_21","Sample_24","Sample_26",
+                                                "Sample_28","Sample_30","Sample_33",
+                                    "Sample_34","Sample_35",            "Sample_40"]
+sample_collection_times =  [1.047198,1.047198,         1.047198,
+                            1.047198,         2.617994,2.617994,
+                            2.617994,2.617994,5.759587,5.759587,
+                                     5.759587,5.759587,4.188790,
+                            4.188790,4.188790,         4.188790]
 # sample_ids_with_collection_times = ["Sample_6", "Sample_16", "Sample_26", "Sample_34"]
 # sample_collection_times = [1.047198, 2.617994, 5.759587, 4.188790]
-sample_ids_with_collection_times = []
-sample_collection_times = []
-if ((length(sample_ids_with_collection_times)+length(sample_collection_times))>0) && (length(sample_ids_with_collection_times) != length(sample_collection_times))
-    error("ATTENTION REQUIRED! Number of sample ids provided (\'sample_ids_with_collection_times\') must match number of collection times (\'sample_collection_times\').")
+
+ids_len = length(sample_ids_with_collection_times)
+times_len = length(sample_collection_times)
+if (ids_len + times_len > 0) && (ids_len != times_len)
+    error("ATTENTION REQUIRED! Number of sample ids provided ('sample_ids_with_collection_times') " *
+    "must match number of collection times ('sample_collection_times').")
 end
 
 # make changes to training parameters, if required. Below are the defaults for the current version of cyclops.
@@ -92,7 +94,7 @@ training_parameters = Dict(:regex_cont => r".*_C",			# What is the regex match f
 :train_μA_scale_lim => 1000, 					# Factor used to divide learning rate to establish smallest the learning rate may shrink to
 :train_circular => false,						# Train symmetrically
 :train_collection_times => true,						# Train using known times
-:train_collection_time_balance => 1.0,					# How is the true time loss rescaled
+:train_collection_time_balance => 0.5,					# How is the true time loss rescaled
 # :train_sample_id => sample_ids_with_collection_times,
 # :train_sample_phase => sample_collection_times,
 
@@ -138,3 +140,8 @@ training_parameters[:align_acrophases] = CYCLOPS.mouse_acrophases[CYCLOPS.human_
 
 eigendata, metricDataframe, correlationDataframe, bestmodel, dataFile_ops = CYCLOPS.Fit(expression_data_2, seed_genes, training_parameters)
 CYCLOPS.Align(expression_data_2, metricDataframe, correlationDataframe, bestmodel, dataFile_ops, output_path)
+
+# eigendata, metricDataframe_2, correlationDataframe_2, bestmodel, dataFile2_ops = CYCLOPS.Fit(expression_data_2, seed_genes, training_parameters)
+# CYCLOPS.Align(expression_data_2, metricDataframe_2, correlationDataframe_2, bestmodel, dataFile2_ops, output_path)
+# dataFile2_transform, metricDataframe_1, correlationDataframe_1, best_model, dataFile1_ops = CYCLOPS.ReApplyFit(bestmodel, expression_data_2, expression_data_1, seed_genes, training_parameters)
+# CYCLOPS.Align(expression_data_2, expression_data_1, metricDataframe_2, metricDataframe_1, correlationDataframe_1, bestmodel, dataFile2_ops, dataFile1_ops, output_path)

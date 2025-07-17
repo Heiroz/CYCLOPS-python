@@ -16,7 +16,8 @@ import datetime
 from scipy.stats import f
 from statsmodels.stats.multitest import multipletests
 mouse_acrophases = [
-    0, 0.0790637050481884, 
+    0, 
+    0.0790637050481884, 
     0.151440116812406, 
     2.29555301890004, 
     2.90900605826091, 
@@ -34,23 +35,23 @@ mouse_acrophases = [
     6.00770260397838
 ]
 mouse_gene_symbol = [
-    "Arntl", 
-    "Clock", 
-    "Npas2", 
-    "Nr1d1", 
-    "Bhlhe41", 
-    "Nr1d2", 
-    "Dbp", 
-    "Ciart", 
-    "Per1", 
-    "Per3", 
-    "Tef", 
-    "Hlf", 
-    "Cry2", 
-    "Per2", 
-    "Cry1", 
-    "Rorc", 
-    "Nfil3"
+    "ARNTL", 
+    "CLOCK", 
+    "NPAS2", 
+    "NR1D1", 
+    "BHLHE41", 
+    "NR1D2", 
+    "DBP", 
+    "CIART", 
+    "PER1", 
+    "PER3", 
+    "TEF", 
+    "HLF", 
+    "CRY2", 
+    "PER2", 
+    "CRY1", 
+    "RORC", 
+    "NFIL3"
 ]
 human_homologue_gene_symbol = [gene.upper() for gene in mouse_gene_symbol]
 subfolders = ["Plots", "Fits", "Models", "Parameters"]

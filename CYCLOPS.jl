@@ -8,8 +8,8 @@ export CosineFit # Currently named CYCLOPS_original_post_process_no_covariates a
 
 using DataFrames, Statistics, StatsBase, LinearAlgebra, MultivariateStats, Flux, PyPlot, Distributed, Random, CSV, Revise, Distributions, Dates, MultipleTesting
 import Flux: onehot, onehotbatch, mse
-hidden_dim1 = 64
-hidden_dim2 = 64
+hidden_dim1 = 8
+hidden_dim2 = 8
 const mouse_acrophases = [
 	0, 
 	0.0790637050481884, 
@@ -30,23 +30,23 @@ const mouse_acrophases = [
 	6.00770260397838
 ]
 const mouse_gene_symbol = [
-	"Arntl", 
-	"Clock", 
-	"Npas2", 
-	"Nr1d1", 
-	"Bhlhe41", 
-	"Nr1d2", 
-	"Dbp", 
-	"Ciart", 
-	"Per1", 
-	"Per3", 
-	"Tef", 
-	"Hlf", 
-	"Cry2", 
-	"Per2", 
-	"Cry1", 
-	"Rorc", 
-	"Nfil3"
+    "ARNTL", 
+    "CLOCK", 
+    "NPAS2", 
+    "NR1D1", 
+    "BHLHE41", 
+    "NR1D2", 
+    "DBP", 
+    "CIART", 
+    "PER1", 
+    "PER3", 
+    "TEF", 
+    "HLF", 
+    "CRY2", 
+    "PER2", 
+    "CRY1", 
+    "RORC", 
+    "NFIL3"
 ]
 const human_homologue_gene_symbol = uppercase.(mouse_gene_symbol)
 const subfolders = ["Plots", "Fits", "Models", "Parameters"]
@@ -55,88 +55,67 @@ const subfolders = ["Plots", "Fits", "Models", "Parameters"]
 # Variables #
 #############
 function DefaultDict()
-	theDefaultDictionary = Dict(:regex_cont => r".*_C",			# What is the regex match for continuous covariates in the data file
-	:regex_disc => r".*_D",							# What is the regex match for discontinuous covariates in the data file
-
-	:blunt_percent => 0.975, 						# What is the percentile cutoff below (lower) and above (upper) which values are capped
-
-	:seed_min_CV => 0.14, 							# The minimum coefficient of variation a gene of interest may have to be included in eigen gene transformation
-	:seed_max_CV => 0.7, 							# The maximum coefficient of a variation a gene of interest may have to be included in eigen gene transformation
-	:seed_mth_Gene => 10000, 						# The minimum mean a gene of interest may have to be included in eigen gene transformation
-
-	:norm_gene_level => true, 						# Does mean normalization occur at the seed gene level
-	:norm_disc => false, 							# Does batch mean normalization occur at the seed gene level
-	:norm_disc_cov => 1, 							# Which discontinuous covariate is used to mean normalize seed level data
-
-	:eigen_reg => true, 							# Does regression again a covariate occur at the eigen gene level
-	:eigen_reg_disc_cov => 1, 						# Which discontinous covariate is used for regression
-	#~~~New Addition~~~#
-	:eigen_reg_exclude => false,					# Are eigen genes with r squared greater than cutoff removed from final eigen data output
-	#~~~~~~~~~~~~~~~~~~#
-	:eigen_reg_r_squared_cutoff => 0.6,				# This cutoff is used to determine whether an eigen gene is excluded from final eigen data used for training
-	:eigen_reg_remove_correct => false,				# Is the first eigen gene removed (true --> default) or it's contributed variance of the first eigne gene corrected by batch regression (false)
-
-	:eigen_first_var => false, 						# Is a captured variance cutoff on the first eigen gene used
-	:eigen_first_var_cutoff => 0.85, 				# Cutoff used on captured variance of first eigen gene
-
-	:eigen_total_var => 0.85, 						# Minimum amount of variance required to be captured by included dimensions of eigen gene data
-	:eigen_contr_var => 0.06, 						# Minimum amount of variance required to be captured by a single dimension of eigen gene data
-	:eigen_var_override => false,					# Is the minimum amount of contributed variance ignored
-	:eigen_max => 5, 								# Maximum number of dimensions allowed to be kept in eigen gene data
-
-	:out_covariates => true, 						# Are covariates included in eigen gene data
-	:out_use_disc_cov => true,						# Are discontinuous covariates included in eigen gene data
-	:out_all_disc_cov => true, 						# Are all discontinuous covariates included if included in eigen gene data
-	:out_disc_cov => 1,								# Which discontinuous covariates are included at the bottom of the eigen gene data, if not all discontinuous covariates
-	:out_use_cont_cov => false,						# Are continuous covariates included in eigen data
-	:out_all_cont_cov => true,						# Are all continuous covariates included in eigen gene data
-	:out_use_norm_cont_cov => false,				# Are continuous covariates Normalized
-	:out_all_norm_cont_cov => true,					# Are all continuous covariates normalized
-	:out_cont_cov => 1,								# Which continuous covariates are included at the bottom of the eigen gene data, if not all continuous covariates, or which continuous covariates are normalized if not all
-	:out_norm_cont_cov => 1,						# Which continuous covariates are normalized if not all continuous covariates are included, and only specific ones are included
-
-	:init_scale_change => true,						# Are scales changed
-	:init_scale_1 => false,							# Are all scales initialized such that the model sees them all as having scale 1
-													# Or they'll be initilized halfway between 1 and their regression estimate.
-
-	:train_n_models => 80, 							# How many models are being trained
-	:train_μA => 0.001, 							# Learning rate of ADAM optimizer
-	:train_β => (0.9, 0.999), 						# β parameter for ADAM optimizer
-	#:train_optimizer => ADAM(0.0001, (0.9, 0.999)),	# optimizer to be used in training of model
-	:train_min_steps => 1500, 						# Minimum number of training steps per model
-	:train_max_steps => 2050, 						# Maximum number of training steps per model
-	:train_μA_scale_lim => 1000, 					# Factor used to divide learning rate to establish smallest the learning rate may shrink to
-	:train_circular => false,						# Train symmetrically
-	:train_collection_times => true,						# Train using known times
-	:train_collection_time_balance => 0.1,					# How is the true time loss rescaled
-	# :train_sample_id => Array{Symbol, 1},
-	# :train_sample_phase => Array{Number, 1},
-
-	:cosine_shift_iterations => 192,				# How many different shifts are tried to find the ideal shift
-	:cosine_covariate_offset => true,				# Are offsets calculated by covariates
-
-	:align_p_cutoff => 0.05,						# When aligning the acrophases, what genes are included according to the specified p-cutoff
-	:align_base => "radians",						# What is the base of the list (:align_acrophases or :align_phases)? "radians" or "hours"
-	:align_disc => false,							# Is a discontinuous covariate used to align (true or false)
-	:align_disc_cov => 1,							# Which discontinuous covariate is used to choose samples to separately align (is an integer)
-	:align_other_covariates => false,				# Are other covariates included
-	:align_batch_only => false,
-	# :align_genes => Array{String, 1},				# A string array of genes used to align CYCLOPS fit output. Goes together with :align_acrophases
-	# :align_acrophases => Array{<: Number, 1}, 	# A number array of acrophases for each gene used to align CYCLOPS fit output. Goes together with :align_genes
-	# :align_samples => Array{String, 1},				# Where T is either Bool—the length of the array is the same as the total number of samples in the data set–or Int—referring to index. Goes together with :align_phases
-	# :align_phases => Array{<: Number, 1},			# A number array of phases for each sample used to align CYCLOPS fit output. Goes together with :align_gsamples
-
-	:X_Val_k => 10,									# How many folds used in cross validation.
-	:X_Val_omit_size => 0.1,						# What is the fraction of samples left out per fold
-
-	:plot_use_o_cov => true,
-	:plot_correct_batches => false,
-	:plot_disc => false,
-	:plot_disc_cov => 1,
-	:plot_separate => false,
-	:plot_color => ["b", "orange", "g", "r", "m", "y", "k"],
-	:plot_only_color => true,
-	:plot_p_cutoff => 0.05)									
+	theDefaultDictionary = Dict(
+		:regex_cont => r".*_C",
+		:regex_disc => r".*_D",
+		:blunt_percent => 0.975,
+		:seed_min_CV => 0.14,
+		:seed_max_CV => 0.7,
+		:seed_mth_Gene => 10000,
+		:norm_gene_level => true,
+		:norm_disc => false,
+		:norm_disc_cov => 1,
+		:eigen_reg => true,
+		:eigen_reg_disc_cov => 1,
+		:eigen_reg_exclude => false,
+		:eigen_reg_r_squared_cutoff => 0.6,
+		:eigen_reg_remove_correct => false,
+		:eigen_first_var => false,
+		:eigen_first_var_cutoff => 0.85,
+		:eigen_total_var => 0.85,
+		:eigen_contr_var => 0.06,
+		:eigen_var_override => false,
+		:eigen_max => 5,
+		:out_covariates => true,
+		:out_use_disc_cov => true,
+		:out_all_disc_cov => true,
+		:out_disc_cov => 1,
+		:out_use_cont_cov => false,
+		:out_all_cont_cov => true,
+		:out_use_norm_cont_cov => false,
+		:out_all_norm_cont_cov => true,
+		:out_cont_cov => 1,
+		:out_norm_cont_cov => 1,
+		:init_scale_change => true,
+		:init_scale_1 => false,
+		:train_n_models => 80,
+		:train_μA => 0.001,
+		:train_β => (0.9, 0.999),
+		:train_min_steps => 1500,
+		:train_max_steps => 2050,
+		:train_μA_scale_lim => 1000,
+		:train_circular => false,
+		:train_collection_times => true,
+		:train_collection_time_balance => 0.1,
+		:cosine_shift_iterations => 192,
+		:cosine_covariate_offset => true,
+		:align_p_cutoff => 0.05,
+		:align_base => "radians",
+		:align_disc => false,
+		:align_disc_cov => 1,
+		:align_other_covariates => false,
+		:align_batch_only => false,
+		:X_Val_k => 10,
+		:X_Val_omit_size => 0.1,
+		:plot_use_o_cov => true,
+		:plot_correct_batches => false,
+		:plot_disc => false,
+		:plot_disc_cov => 1,
+		:plot_separate => false,
+		:plot_color => ["b", "orange", "g", "r", "m", "y", "k"],
+		:plot_only_color => true,
+		:plot_p_cutoff => 0.05
+	)
 	return theDefaultDictionary
 end
 
@@ -176,7 +155,7 @@ function CircularNode(x::Array{Float32, 1})
 	sqrt(sum(x .^2)) != .0 || error("Both inputs to the circular node are 0.")
 	sqrt(sum(x .^2)) != Inf || error("One or both of the inputs to the circular node are Inf.")
 	!isnan(sqrt(sum(x .^2))) || error("One or both of the inputs to the circular node are NaN.")
-    return x./sqrt(sum(x .^2)) # Convert x and y coordinates to points on a circle
+    return x./sqrt(sum(x .^2))
 end
 
 function CircularNode(x::Array{Float64, 1})
@@ -184,7 +163,7 @@ function CircularNode(x::Array{Float64, 1})
 	sqrt(sum(x .^2)) != .0 || error("Both inputs to the circular node are 0.")
 	sqrt(sum(x .^2)) != Inf || error("One or both of the inputs to the circular node are Inf.")
 	!isnan(sqrt(sum(x .^2))) || error("One or both of the inputs to the circular node are NaN.")
-    return x./sqrt(sum(x .^2)) # Convert x and y coordinates to points on a circle
+    return x./sqrt(sum(x .^2))
 end
 
 function CircularNode(x::Array{Float32, 2})
@@ -235,10 +214,10 @@ end
 # CYCLOPS Types #
 #################
 struct Order
-    L1  # Linear layer from # eigengenes to 2
-    c   # Circ layer
-    L2  # Linear layer from 2 to # eigengenes
-    o   # output dimension used for oldcyclops
+    L1
+    c
+    L2
+    o
 end
 
 struct Covariates
@@ -247,8 +226,6 @@ struct Covariates
     B_OH	
     L1
     L2
-    L3
-    L4
     o   	
 end
 
@@ -263,9 +240,9 @@ end
 # CYCLOPS Functions #
 #####################
 function (m::Order)(x::Array{Float32,1})
-    Fully_Connected_Encoding = m.L1(x[1:m.o]) # Function for linear (dense, or fully connected) input layer
-    Circular_Layer = CircularNode(Fully_Connected_Encoding) # Circular bottleneck
-    Fully_Connected_Decoding = m.L2(Circular_Layer) # Function for linear (dense, or fully connected) output layer
+    Fully_Connected_Encoding = m.L1(x[1:m.o])
+    Circular_Layer = CircularNode(Fully_Connected_Encoding)
+    Fully_Connected_Decoding = m.L2(Circular_Layer)
 	return Fully_Connected_Decoding
 end
 
@@ -287,13 +264,11 @@ end
 
 function (m::Covariates)(x::Array{Float32,1})
     Encoding_Onehot = x[1:m.o] .* (1 .+ (m.S_OH * x[m.o + 1:end])) .+ (m.B_OH * x[m.o + 1:end]) .+ m.B
-    Layer1 = relu.(m.L1(Encoding_Onehot))
-    Layer2 = m.L2(Layer1)
-	Circular_Layer = CircularNode(Layer2)
-    Layer3 = relu.(m.L3(Circular_Layer))
-    Fully_Connected_Decoding = m.L4(Layer3)
-    Decoding_Onehot = ((Fully_Connected_Decoding .- (m.B_OH * x[m.o + 1:end]) .- m.B) ./ (1 .+ (m.S_OH * x[m.o + 1:end])))
-    return Decoding_Onehot
+    Fully_Connected_Encoding = m.L1(Encoding_Onehot)
+	Cicular_Layer = CircularNode(Fully_Connected_Encoding)
+	Fully_Connected_Decoding = m.L2(Cicular_Layer)
+	Decoding_Onehot = ((Fully_Connected_Decoding .- (m.B_OH * x[m.o + 1:end]) .- m.B) ./ (1 .+ (m.S_OH * x[m.o + 1:end])))
+	return Decoding_Onehot
 end
 
 function (m::Covariates)(x::Array{Float32,2})
@@ -365,9 +340,7 @@ function CovariatesDecodingOH(x::Array{Array{Float32,1}, 2}, y::Array{Float32,2}
 end
 
 function CovariatesEncodingDense(x::Array{Float32,1}, m::Covariates)
-	layer_1 = relu.(m.L1(x))
-	layer_2 = m.L2(layer_1)
-	return layer_2
+	return m.L1(x)
 end
 
 function CovariatesEncodingDense(x::Array{Float32,2}, m::Covariates)
@@ -383,8 +356,7 @@ function CovariatesEncodingDense(x::Array{Array{Float32,1},1}, m::Covariates)
 end
 
 function CovariatesDecodingDense(x::Array{Float32,1}, m::Covariates)
-	layer_3 = relu.(m.L3(x))
-	return m.L4(layer_3)
+	return m.L2(x)
 end
 
 function CovariatesDecodingDense(x::Array{Float32,2}, m::Covariates)
@@ -855,10 +827,8 @@ function InitializeModel(eigen_data, options)
 										Array{Float32}(use_S_OH), 
 										Array{Float32}(use_B), 
 										Array{Float32}(use_B_OH), 
-										Dense(options[:o_svd_n_dims], hidden_dim1),
-										Dense(hidden_dim1, 2),
-										Dense(2, hidden_dim2),
-										Dense(hidden_dim2, options[:o_svd_n_dims]),
+										Dense(options[:o_svd_n_dims], 2),
+										Dense(2, options[:o_svd_n_dims]),
 										options[:o_svd_n_dims]
 									)])
 		end
@@ -871,12 +841,12 @@ end
 # CYCLOPS Decoding #
 ####################
 function Decoder(data_matrix, model, n_circs::Integer)
-    points = size(data_matrix, 2) # Determine the total number of samples
-    phases = Array{Float32}(zeros(n_circs, points)) # Initialize list of phases
+    points = size(data_matrix, 2)
+    phases = Array{Float32}(zeros(n_circs, points))
     base = 0
-    for c in 1:n_circs # how many circular bottleneck layers are there (usually 1)
-        for n in 1:points # for each sample
-            pos = model(data_matrix[:, n]) # pos is a 2 element array
+    for c in 1:n_circs
+        for n in 1:points
+            pos = model(data_matrix[:, n])
             phases[c, n] = atan(pos[2 + base], pos[1 + base])
         end
         base += 2
@@ -941,11 +911,11 @@ function CovariatesDecoder(trained_models_and_errors::Array{Any, 1}, gea::Array{
 	models = map(x -> x[1], trained_models_and_errors)
 	best_model = models[lowest_loss_index]
 	
-	eigenspace_magnitudes = sqrtsumofsquares(gea[1:best_model.o,:]) # sqrt(sum(A^2))
-	encoding_dense_magnitudes = CovariatesEncodingDenseMagnitude(gea, best_model) # sqrt(sum(B^2))
-	magnitudes = CovariatesMagnitude(best_model, gea, Float32) # sqrt(sum(C^2))
-	decoding_dense_magnitudes = CovariatesDecodingDenseMagnitude(gea, best_model) # sqrt(sum(E^2))
-	decoding_eigenspace_magnitudes = sqrtsumofsquares(gea, best_model) # sqrt(sum(F^2))
+	eigenspace_magnitudes = sqrtsumofsquares(gea[1:best_model.o,:])
+	encoding_dense_magnitudes = CovariatesEncodingDenseMagnitude(gea, best_model)
+	magnitudes = CovariatesMagnitude(best_model, gea, Float32)
+	decoding_dense_magnitudes = CovariatesDecodingDenseMagnitude(gea, best_model)
+	decoding_eigenspace_magnitudes = sqrtsumofsquares(gea, best_model)
 	
 	decoding_dense_skip_circle_magnitudes = CovariatesSkipCircularNodeDecodingDenseMagnitude(gea, best_model)
 	decoding_OH_skip_circle_magnitudes = CovariatesSkipCircularNodeDecodingOHMagnitude(gea, best_model)
@@ -953,11 +923,11 @@ function CovariatesDecoder(trained_models_and_errors::Array{Any, 1}, gea::Array{
 	projections = vcat(permutedims.(CovariatesThroughEncodingDense(gea, best_model))...)
 	phases = CovariatesPhase(gea, best_model)
 	
-	model_errors = MSELoss(gea, best_model) # sqrt((A-F)^2)
-	inner_errors = get_inner_mse(gea, best_model) # sqrt((B-E)^2)
-	circ_errors = get_circ_mse(gea, best_model) # sqrt((C-D)^2)
-	skip_circle_inner_errors = get_skip_circle_inner_mse(gea, best_model) # sqrt((B-E_b)^2)
-	skip_circle_errors = get_skip_circle_mse(gea, best_model) # sqrt((A-F_b^2))
+	model_errors = MSELoss(gea, best_model)
+	inner_errors = get_inner_mse(gea, best_model)
+	circ_errors = get_circ_mse(gea, best_model)
+	skip_circle_inner_errors = get_skip_circle_inner_mse(gea, best_model)
+	skip_circle_errors = get_skip_circle_mse(gea, best_model)
 
 	out_of_plane_errors = get_out_of_plane_error(gea, best_model)
 	out_of_plane_reconstruction_errors = get_out_of_plane_reconstruction_error(gea, best_model)
@@ -983,28 +953,45 @@ function CovariatesDecoder(trained_models_and_errors::Array{Any, 1}, gea::Array{
 end
 
 function CovariatesDecoder(best_model, gea::Array{Float32,2}, OUT_TYPE = Float64)
-	eigenspace_magnitudes = sqrtsumofsquares(gea[1:best_model.o,:]) # sqrt(sum(A^2))
-	encoding_dense_magnitudes = CovariatesEncodingDenseMagnitude(gea, best_model) # sqrt(sum(B^2))
-	magnitudes = CovariatesMagnitude(best_model, gea, Float32) # sqrt(sum(C^2))
-	decoding_dense_magnitudes = CovariatesDecodingDenseMagnitude(gea, best_model) # sqrt(sum(E^2))
-	decoding_eigenspace_magnitudes = sqrtsumofsquares(gea, best_model) # sqrt(sum(F^2))
+	eigenspace_magnitudes = sqrtsumofsquares(gea[1:best_model.o,:])
+	encoding_dense_magnitudes = CovariatesEncodingDenseMagnitude(gea, best_model)
+	magnitudes = CovariatesMagnitude(best_model, gea, Float32)
+	decoding_dense_magnitudes = CovariatesDecodingDenseMagnitude(gea, best_model)
+	decoding_eigenspace_magnitudes = sqrtsumofsquares(gea, best_model)
 	
-	decoding_dense_skip_circle_magnitudes = CovariatesSkipCircularNodeDecodingDenseMagnitude(gea, best_model) # sqrt(sum(E_b^2))
-	decoding_OH_skip_circle_magnitudes = CovariatesSkipCircularNodeDecodingOHMagnitude(gea, best_model) # sqrt(sum(F_b^2))
+	decoding_dense_skip_circle_magnitudes = CovariatesSkipCircularNodeDecodingDenseMagnitude(gea, best_model)
+	decoding_OH_skip_circle_magnitudes = CovariatesSkipCircularNodeDecodingOHMagnitude(gea, best_model)
 	
 	projections = vcat(permutedims.(CovariatesThroughEncodingDense(gea, best_model))...)
 	phases = CovariatesPhase(gea, best_model)
 	
-	model_errors = MSELoss(gea, best_model) # sqrt((A-F)^2)
-	inner_errors = get_inner_mse(gea, best_model) # sqrt((B-E)^2)
-	circ_errors = get_circ_mse(gea, best_model) # sqrt((C-D)^2)
-	skip_circle_inner_errors = get_skip_circle_inner_mse(gea, best_model) # sqrt((B-E_b)^2)
-	skip_circle_errors = get_skip_circle_mse(gea, best_model) # sqrt((A-F_b^2))
+	model_errors = MSELoss(gea, best_model)
+	inner_errors = get_inner_mse(gea, best_model)
+	circ_errors = get_circ_mse(gea, best_model)
+	skip_circle_inner_errors = get_skip_circle_inner_mse(gea, best_model)
+	skip_circle_errors = get_skip_circle_mse(gea, best_model)
 
 	out_of_plane_errors = get_out_of_plane_error(gea, best_model)
 	out_of_plane_reconstruction_errors = get_out_of_plane_reconstruction_error(gea, best_model)
 
-	return best_model, hcat(phases, model_errors, magnitudes, projections, inner_errors, circ_errors, skip_circle_inner_errors, skip_circle_errors, out_of_plane_errors, out_of_plane_reconstruction_errors, eigenspace_magnitudes, encoding_dense_magnitudes, decoding_dense_magnitudes, decoding_eigenspace_magnitudes, decoding_dense_skip_circle_magnitudes, decoding_OH_skip_circle_magnitudes)
+	return best_model, hcat(
+							phases, 
+							model_errors, 
+							magnitudes, 
+							projections, 
+							inner_errors, 
+							circ_errors, 
+							skip_circle_inner_errors, 
+							skip_circle_errors, 
+							out_of_plane_errors, 
+							out_of_plane_reconstruction_errors, 
+							eigenspace_magnitudes, 
+							encoding_dense_magnitudes, 
+							decoding_dense_magnitudes, 
+							decoding_eigenspace_magnitudes, 
+							decoding_dense_skip_circle_magnitudes, 
+							decoding_OH_skip_circle_magnitudes
+						)
 end
 
 function OrderDecoder(m_array::Array{Any,1}, gea::Array{Float32,2}, OUT_TYPE = Float64)
@@ -1012,9 +999,9 @@ function OrderDecoder(m_array::Array{Any,1}, gea::Array{Float32,2}, OUT_TYPE = F
 	m = m_array[findmin(losses)[2]]
 	eigenspace_magnitudes = sqrtsumofsquares(gea)
 	magnitudes = OrderMagnitude(m, gea, Float32)
-	decoding_eigenspace_magnitudes = sqrtsumofsquares(gea, m) # make function for order model
+	decoding_eigenspace_magnitudes = sqrtsumofsquares(gea, m)
 	
-	decoding_eigenspace_skip_circle_magnitudes = OrderSkipCircularNodeMagnitude(gea, m) # make function for order model
+	decoding_eigenspace_skip_circle_magnitudes = OrderSkipCircularNodeMagnitude(gea, m)
 	
 	projections = vcat(permutedims.(OrderThroughEncodingDense(gea, m))...)
 	phases = OrderPhase(gea, m)
@@ -1032,9 +1019,9 @@ end
 function OrderDecoder(best_model, gea::Array{Float32,2}, OUT_TYPE = Float64)
 	eigenspace_magnitudes = sqrtsumofsquares(gea)
 	magnitudes = OrderMagnitude(best_model, gea, Float32)
-	decoding_eigenspace_magnitudes = sqrtsumofsquares(gea, best_model) # make function for order model
+	decoding_eigenspace_magnitudes = sqrtsumofsquares(gea, best_model)
 	
-	decoding_eigenspace_skip_circle_magnitudes = OrderSkipCircularNodeMagnitude(gea, best_model) # make function for order model
+	decoding_eigenspace_skip_circle_magnitudes = OrderSkipCircularNodeMagnitude(gea, best_model)
 	
 	projections = vcat(permutedims.(OrderThroughEncodingDense(gea, best_model))...)
 	phases = OrderPhase(gea, best_model)
@@ -1110,7 +1097,6 @@ function UniversalModelLoader(path)
 	L1_dense = DenseFunction(L1_model_values...)
 	L2_dense
 
-	# dense_parameter_indices_in_model_parameter = findXinY(dense_parameters, model_parameters)
 end
 
 function SaveCovariatesModel(x; dir=pwd(), name::String="Model1")
@@ -1282,7 +1268,15 @@ end
 ######################
 # Training Functions #
 ######################
-function TrainCovariates(m, gea_vectorized; MinSteps::Int = 250, MaxSteps::Int = 1000, μA = 0.0001, β = (0.9, 0.999), cutoff::Int = 1000)
+function TrainCovariates(
+	m, 
+	gea_vectorized; 
+	MinSteps::Int = 250, 
+	MaxSteps::Int = 1000, 
+	μA = 0.0001, 
+	β = (0.9, 0.999), 
+	cutoff::Int = 1000
+)
 	local c1 = 0
 	local c2 = 0
 	local c3 = 0
@@ -1295,7 +1289,13 @@ function TrainCovariates(m, gea_vectorized; MinSteps::Int = 250, MaxSteps::Int =
 		μA_original = μA
 		while c1 < MinSteps
 			c1 += 1
-			Flux.train!(x->mse(m(x), x[1:m.o]), Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L2), zip(gea_vectorized), ADAM(μA, β), cb = () -> ())
+			Flux.train!(
+				x->mse(m(x), x[1:m.o]),
+				Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L2),
+				zip(gea_vectorized),
+				ADAM(μA, β),
+				cb = () -> ()
+			)
 		end
 		
 		smallest_μA = μA
@@ -1307,7 +1307,13 @@ function TrainCovariates(m, gea_vectorized; MinSteps::Int = 250, MaxSteps::Int =
 			μA = μA * 1.05
 			before = mean(map(x -> mse(m(x), x[1:m.o]), gea_vectorized))
 			before_m = deepcopy(m)
-			Flux.train!(x->mse(m(x), x[1:m.o]), Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L2), zip(gea_vectorized), ADAM(μA, β), cb = () -> ())
+			Flux.train!(
+				x->mse(m(x), x[1:m.o]),
+				Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L2),
+				zip(gea_vectorized),
+				ADAM(μA, β),
+				cb = () -> ()
+			)
 			after = mean(map(x -> mse(m(x), x[1:m.o]), gea_vectorized))
 			change = before - after
 
@@ -1316,7 +1322,13 @@ function TrainCovariates(m, gea_vectorized; MinSteps::Int = 250, MaxSteps::Int =
 				c4 += 1
 				μA = μA * 0.5
 				m = before_m
-				Flux.train!(x->mse(m(x), x[1:m.o]), Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L2), zip(gea_vectorized), ADAM(μA, β), cb = () -> ())
+				Flux.train!(
+					x->mse(m(x), x[1:m.o]), 
+					Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L2), 
+					zip(gea_vectorized), 
+					ADAM(μA, β), 
+					cb = () -> ()
+				)
 				after = mean(map(x -> mse(m(x), x[1:m.o]), gea_vectorized))
 				change = before - after
 			end
@@ -1338,7 +1350,12 @@ function TrainCovariates(m, gea_vectorized; MinSteps::Int = 250, MaxSteps::Int =
 
 		end
 		
-		println("Model took $(c1 + c2) total training steps. Of these, $(c2) were variable learning rate steps.\nThe learning rate was decreased $c3 times and was smaller than the original learning rate for $c5 steps.\nThe learning rate was increased $c2 times and was larger than the original learning rate for $c6 steps.\nThe final learning rate was $(trunc(μA, sigdigits = 4)); the smallest the learning rate became was $(smallest_μA) and the largest it became was $(largest_μA).\n\n~~~~~~~~~~~~TRAINING COMPLETE~~~~~~~~~~~~\n\n")
+		println("Model took $(c1 + c2) total training steps. Of these, $(c2) were variable learning rate steps.\n" *
+		"The learning rate was decreased $c3 times and was smaller than the original learning rate for $c5 steps.\n" *
+		"The learning rate was increased $c2 times and was larger than the original learning rate for $c6 steps.\n" *
+		"The final learning rate was $(trunc(μA, sigdigits = 4)); " *
+		"the smallest the learning rate became was $(smallest_μA) and the largest it became was $(largest_μA).\n\n" *
+		"~~~~~~~~~~~~TRAINING COMPLETE~~~~~~~~~~~~\n\n")
 
 	catch e
 		println("An error occured in training. $(c1 + c2) steps ($(c2) variable) were taken before the error occured.")
@@ -1348,7 +1365,17 @@ function TrainCovariates(m, gea_vectorized; MinSteps::Int = 250, MaxSteps::Int =
 	return m, after
 end
 
-function TrainCovariatesTrueTimes(m, gea_vectorized, collection_times_with_flag_vectorized; MinSteps::Int = 250, MaxSteps::Int = 1000, μA = 0.0001, β = (0.9, 0.999), cutoff::Int = 1000, collection_time_balance = 4)
+function TrainCovariatesTrueTimes(
+	m, 
+	gea_vectorized, 
+	collection_times_with_flag_vectorized; 
+	MinSteps::Int = 250, 
+	MaxSteps::Int = 1000, 
+	μA = 0.0001, 
+	β = (0.9, 0.999), 
+	cutoff::Int = 1000, 
+	collection_time_balance = 4
+)
     
 	local c1 = 0
 	local c2 = 0
@@ -1407,7 +1434,13 @@ function TrainCovariatesTrueTimes(m, gea_vectorized, collection_times_with_flag_
 
 		while c1 < MinSteps
 			c1 += 1
-			Flux.train!((x, y) -> TotalLoss2(x, y, collection_time_balance), Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L2), zip_data, ADAM(μA, β), cb = () -> ()) # Error here
+			Flux.train!(
+                (x, y) -> TotalLoss2(x, y, collection_time_balance),
+                Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L2), 
+                zip_data, 
+                ADAM(μA, β), 
+                cb = () -> ()
+            )
 		end
 
 		smallest_μA = μA
@@ -1420,11 +1453,15 @@ function TrainCovariatesTrueTimes(m, gea_vectorized, collection_times_with_flag_
 			c2 += 1
 			μA = μA * 1.05
 			before = mean(map(x -> TotalLoss2(x[1], x[2], collection_time_balance), zip_data))
-			#before = mean(map(x -> mse(m(x), x[1:m.o]), gea_vectorized))
 			before_m = deepcopy(m)
-			Flux.train!((x, y) -> TotalLoss2(x, y, collection_time_balance), Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L2), zip_data, ADAM(μA, β), cb = () -> ())
+			Flux.train!(
+                (x, y) -> TotalLoss2(x, y, collection_time_balance), 
+                Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L2), 
+                zip_data, 
+                ADAM(μA, β), 
+                cb = () -> ()
+            )
 			after = mean(map(x -> TotalLoss2(x[1], x[2], collection_time_balance), zip_data))
-			# after = mean(map(x -> mse(m(x), x[1:m.o]), gea_vectorized))
 			change = before - after
 
 			while (change <= 0) & (μA > μA_original/cutoff)
@@ -1432,7 +1469,13 @@ function TrainCovariatesTrueTimes(m, gea_vectorized, collection_times_with_flag_
 				c4 += 1
 				μA = μA * 0.5
 				m = before_m
-				Flux.train!((x, y) -> TotalLoss2(x, y, collection_time_balance), Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L2), zip_data, ADAM(μA, β), cb = () -> ())
+				Flux.train!(
+                    (x, y) -> TotalLoss2(x, y, collection_time_balance), 
+                    Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L2), 
+                    zip_data, 
+                    ADAM(μA, β), 
+                    cb = () -> ()
+                )
 				after = mean(map(x -> TotalLoss2(x[1], x[2], collection_time_balance), zip_data))
 				change = before - after
 			end
@@ -1454,7 +1497,13 @@ function TrainCovariatesTrueTimes(m, gea_vectorized, collection_times_with_flag_
 
 		end
 
-		println("Model took $(c1 + c2) total training steps. Of these, $(c2) were variable learning rate steps.\nThe learning rate was decreased $c3 times and was smaller than the original learning rate for $c5 steps.\nThe learning rate was increased $c2 times and was larger than the original learning rate for $c6 steps.\nThe final learning rate was $(trunc(μA, sigdigits=4)); the smallest the learning rate became was $(smallest_μA) and the largest it became was $(largest_μA).\n\n~~~~~~~~~~~~TRAINING COMPLETE~~~~~~~~~~~~\n\n")
+		println("Model took $(c1 + c2) total training steps. Of these, $(c2) were variable learning rate steps.\n" *
+			"The learning rate was decreased $c3 times and was smaller than the original learning rate for $c5 steps.\n" *
+			"The learning rate was increased $c2 times and was larger than the original learning rate for $c6 steps.\n" *
+			"The final learning rate was $(trunc(μA, sigdigits=4)); " *
+			"the smallest the learning rate became was $(smallest_μA) and the largest it became was $(largest_μA).\n\n" *
+			"~~~~~~~~~~~~TRAINING COMPLETE~~~~~~~~~~~~\n\n"
+		)
 
 	catch e
 		println("An error occured in training. $(c1 + c2 + c4) steps ($(c3 + c2) variable) were taken before the error occured.")
@@ -1464,7 +1513,15 @@ function TrainCovariatesTrueTimes(m, gea_vectorized, collection_times_with_flag_
 	return m, after
 end
 
-function TrainCovariatesCircular(m, gea_vectorized; MinSteps::Int = 250, MaxSteps::Int = 1000, μA = 0.0001, β = (0.9, 0.999), cutoff::Int = 1000)
+function TrainCovariatesCircular(
+	m, 
+	gea_vectorized; 
+	MinSteps::Int = 250, 
+	MaxSteps::Int = 1000, 
+	μA = 0.0001, 
+	β = (0.9, 0.999), 
+	cutoff::Int = 1000
+)
     μA_original = deepcopy(μA)
     c1 = 0
     while c1 < MinSteps
@@ -1534,7 +1591,7 @@ function TrainOrder(m, gea_vectorized; MinSteps::Int = 250, MaxSteps::Int = 1000
             change = before - after
         end
     end
-	return m # ", after" removed because OrderDecoder not setup to handle tuple of model and erro
+	return m
 end
 
 function MultiTrainCovariates(m_array, gea::Array{Float32,2}, options)
@@ -1560,9 +1617,6 @@ function MultiTrainCovariates(m_array, gea::Array{Float32,2}, options)
 	elseif haskey(options, :train_sample_id) & options[:train_collection_times]
 		known_sample_indices = findXinY(options[:train_sample_id], options[:o_column_ids])
 		init_collection_time = zeros(length(gea_vectorized))
-		# println(length(init_collection_time))
-		# println(length(options[:align_phases]))
-		# println(length(options[:align_samples]))
 		init_collection_time[known_sample_indices] .= options[:train_sample_phase]
 		init_collection_time_flag = falses(length(init_collection_time))
 		init_collection_time_flag[known_sample_indices] .= true
@@ -1916,9 +1970,8 @@ function CovariateProcessing(dataFile1, dataFile2, options)
 
 	ops1[:o_column_ids] = names(dataFile1)[2:end]
 	ops2[:o_column_ids] = names(dataFile2)[2:end]
-	geneColumn = dataFile1[:, 1] # The column that contains the covariate row names but also all the gene symbols for the expression matrix
-	contCovIndx = FindRegexinArray(ops1[:regex_cont], geneColumn) # Find the continuous covariate rows
-	# println(contCovIndx)
+	geneColumn = dataFile1[:, 1]
+	contCovIndx = FindRegexinArray(ops1[:regex_cont], geneColumn)
 	cont_cov_row1 = missing # Init
 	cont_cov_row2 = missing # Init
 	cont_min_max1 = missing # Init
@@ -2021,32 +2074,11 @@ function findXinYinX(search_x, in_y)
         output_dataframe = DataFrame(IndexOfXinY = matchable_indices)
     end
     reverse_indices = vcat(map(x -> findall(search_x .== x), matches)...)
-	#=
-	println(size(matches))
-	println(size(output_dataframe[:, :IndexOfXinY]))
-	println(size(reverse_indices))
-	=#
+
     output_dataframe[:, :IndexOfXinYinX] = reverse_indices
     output_dataframe[:, :Matches] = matches
 	
 	return output_dataframe
-	#=
-	indices_make_sense = (in_y[vcat(output_dataframe[:, :IndexOfXinY]...)] == search_x[output_dataframe[:, :IndexOfXinYinX]])
-    matches_line_up = (in_y[vcat(output_dataframe[:, :IndexOfXinY]...)] == output_dataframe[:, :Matches]) & (search_x[output_dataframe[:, :IndexOfXinYinX]] == output_dataframe[:, :Matches])
-
-    if indices_make_sense & matches_line_up
-        print_positive_check_result && println("\nChecks passed.\n")
-        return output_dataframe
-    else
-        if indices_make_sense
-            error("Matches do not line up")
-        elseif matches_line_up
-            error("Indices do not make sense")
-        else
-            error("Indices do not make sense and Matches do not line up")
-        end
-    end
-	=#
 end
 
 function findXinYinX(search_x, in_y, keep_empty::Bool)
@@ -2252,30 +2284,7 @@ function SVDReduceDimensions(S, S_logical, ops)
 end
 
 function CovariateOnehotEncoder!(Transform, ops)
-	#=
-	are_there_discontinuous_covariates = (length(ops[:o_dco]) > 0)
-	are_there_continuous_covariates = (length(ops[:o_cc]) > 0)
-	are_there_covariates = are_there_discontinuous_covariates | are_there_continuous_covariates
-	are_covariates_being_used  = ops[:out_covariates]
-	are_discontinuous_covariates_used = ops[:out_use_disc_cov]
-	are_all_discontinuous_covariates_used = ops[:out_all_disc_cov]
-	which_discontinuous_covariates_are_used = ops[:out_disc_cov]
-	are_more_than_one_discontinuous_covariate_used = length(ops[:out_disc_cov]) > 1
-	are_continuous_covariates_used = ops[:out_use_cont_cov]
-	are_all_continuous_covariates_used = ops[:out_all_cont_cov]
-	are_continuous_covariates_normalized = ops[:out_use_norm_cont_cov]
-	are_all_continuous_covariates_normalized = ops[:out_all_norm_cont_cov]
-	which_continuous_covariates_are_used = ops[:out_cont_cov]
-	which_continuous_covariates_are_normalized = ops[:out_norm_cont_cov]
 
-	if are_there_covariates & are_covariates_being_used
-		scale_array = Array{Any}([])
-		if are_there_discontinuous_covariates & are_discontinuous_covariates_used
-			if are_all_discontinuous_covariates_used # | 
-			end
-		end
-	end
-	=#
 	Transform_copy = deepcopy(Transform)
 	are_there_discontinuous_covariates = !(ismissing(ops[:o_dco]))
 	are_there_continuous_covariates = !(ismissing(ops[:o_cc]))
@@ -2485,7 +2494,7 @@ function Eigengenes_d1!(dataFile1, dataFile2, genesOfInterest, ops, matching_sym
 	ops2 = DefaultDict(ops)
 
 	CovariateProcessing!(dataFile1, ops1)
-	CovariateProcessing!(dataFile2_overlap, ops2) # returns updated options. Look at function CovariateProcessing to see the long hand for each of the new keys added to the dictionary
+	CovariateProcessing!(dataFile2_overlap, ops2)
 	
 	bluntedDataFile1 = BluntXthPercentile(dataFile1, ops1, OUT_TYPE=DataFrame)
 	bluntedDataFile2 = BluntXthPercentile(dataFile2_overlap, ops2, OUT_TYPE=DataFrame)
@@ -2967,7 +2976,6 @@ function OutputFolders(ouput_path, ops)
 	master_output_folder_path = CheckPath(master_output_folder_path)
 	println("\tOUTPUTS WILL BE SAVED IN $(master_output_folder_path)\n\n")
 	all_subfolder_paths = Array{Any}([])
-	# subfolders is a constant defined within the CYCLOPS module as const subfolders = ["Plots", "Fits", "Models", "Parameters"]
 	for folder_name in subfolders
 		sub_output_folder_path = joinpath(master_output_folder_path, folder_name)
 		CheckPath!(sub_output_folder_path)
@@ -3044,14 +3052,6 @@ function CrossValidationFinal(dataFile, genesOfInterest, options = Dict(); _verb
 	lo_sample_F_Stat_collection = Array{Any, 1}([])
 	lo_sample_J_Stat_collection = Array{Any, 1}([])
 	lo_sample_Pearson_collection = Array{Any, 1}([])
-		
-	# my_info("INITIALIZE ACROPHASE METRIC ARRAYS")
-	# acrophase_error_metric = Array{Any, 1}([])
-	# acrophase_error_metric_std = Array{Any, 1}([])
-	# acrophase_F_Stat_collection = Array{Any, 1}([])
-	# acrophase_J_Stat_collection = Array{Any, 1}([])
-	# acrophase_Pearson_collection = Array{Any, 1}([])
-	# n_mouse_atlas_acrophases = Array{Any, 1}([])
 	
 	covariates_for_batch_to_split_by = Bool.(full_options[:o_dco][full_options[:out_disc_cov][1]])
 
@@ -3096,8 +3096,6 @@ function CrossValidationFinal(dataFile, genesOfInterest, options = Dict(); _verb
 		partial_options = Dict(full_options)
 		
 		my_info("GET SAMPLE IDS FOR FOLD $(ii).")
-		# my_info("Number of eigen gene dimensions with covariates = $(full_options[:o_svd_n_dims]). Number of eigen gene dimensions = $(size(full_eigen_data, 1)).")
-		# if (full_options[:o_svd_n_dims] < size(full_eigen_data, 1)) & (length(full_options[:o_dco]) > 0)
 		if (full_options[:o_svd_n_dims] < size(full_eigen_data, 1)) & !(ismissing(full_options[:o_dco]))
 			
 			if haskey(full_options, :train_sample_id) & full_options[:train_collection_times]
@@ -3194,15 +3192,6 @@ function CrossValidationFinal(dataFile, genesOfInterest, options = Dict(); _verb
 			left_out_known_sample_phases = full_options[:train_sample_phase][train_sample_id_indices_left_out]
 			CircError!(left_out_shifted_samples_with_known_times, left_out_known_sample_phases, lo_sample_wtt_error_metric, lo_sample_wtt_error_metric_std)
 			F_J_Rho_Stats!(left_out_shifted_samples_with_known_times, left_out_known_sample_phases, lo_sample_wtt_F_Stat_collection, lo_sample_wtt_J_Stat_collection, lo_sample_wtt_Pearson_collection)
-
-			#=
-			samples_with_known_times_used_for_training = shifted_sample_phases[samples_with_known_times_this_fold]
-			sample_ids_with_known_times_used_for_trianing = all_column_ids[samples_with_known_times_this_fold]
-			train_sample_id_indices_used_for_training = CYCLOPS.findXinY(sample_ids_with_known_times_used_for_trianing, full_options[:train_sample_id])
-			known_sample_phases_used_for_training = full_options[:train_sample_phase][train_sample_id_indices_used_for_training]
-			CircError!(samples_with_known_times_used_for_training, known_sample_phases_used_for_training, trained_sample_wtt_error_metric, trained_sample_wtt_error_metric_std)
-			F_J_Rho_Stats!(samples_with_known_times_used_for_training, known_sample_phases_used_for_training, trained_sample_wtt_F_Stat_collection, trained_sample_wtt_J_Stat_collection, trained_sample_wtt_Pearson_collection)
-			=#
 		end
 
 	end
@@ -3316,45 +3305,6 @@ function covariates_0_check(onehotmatrix::Array{Bool,2})
 	end
 end
 
-# function covariates_0_check(ops, silence_output = false)
-# 	if haskey(ops, :o_covariates)
-# 		number_of_samples_per_group = sum(ops[:o_covariates], dims = 1)
-# 		zero_groups_logical = vcat((number_of_samples_per_group .== 0)...)
-# 		total_number_of_zero_groups = sum(zero_groups_logical)
-# 		non_zero_groups_logical = .!(zero_groups_logical)
-# 		total_number_of_samples_in_group_1s = [sum(sum(ops[:o_dcorr][ii], dims = 1) .== 0) for ii in 1:length(ops[:o_dcorr])]
-# 		is_group_one_zero_logical = total_number_of_samples_in_group_1s .== 0
-# 		total_zero_groups = trues(length(is_group_one_zero_logical) + length(zero_groups_logical))
-# 		first_group_indices = vcat(0, length.(ops[:o_dcl])[1:end-1]) .+ 1
-# 		non_first_group_indices = setdiff(1:length(total_zero_groups), first_group_indices)
-# 		total_zero_groups[first_group_indices] .= is_group_one_zero_logical
-# 		total_zero_groups[non_first_group_indices] .= zero_groups_logical
-		
-# 		if total_number_of_zero_groups > 0
-# 			usable_covariates = ops[:o_covariates][:, non_zero_groups_logical]
-# 			if ops[:out_all_disc_cov]
-# 				removed_covariate_labels = vcat(ops[:o_dcl]...)[total_zero_groups]
-# 				kept_covariate_labels = vcat(ops[:o_dcl]...)[.!(total_zero_groups)]
-# 				my_warn("Leaving out groups $(join(removed_covariate_labels, ", ", " and ")).", silence_output)
-# 				my_warn("Remaining groups are $(join(kept_covariate_labels, ", ", " and ")).", silence_output)
-# 			elseif ops[:out_use_disc_cov]
-# 				removed_covariate_labels = ops[:o_dcl][ops[:out_disc_cov]][vcat(is_group_one_zero_logical, zero_groups_logical)]
-# 				kept_covariate_labels = ops[:o_dcl][ops[:out_disc_cov]][vcat(!is_group_one_zero_logical, non_zero_groups_logical)]
-# 				my_warn("Leaving out groups $(join(removed_covariate_labels, ", ", " and ")).", silence_output)
-# 				my_warn("Remaning groups are $(join(kept_covariate_labels, ", ", " and ")).", silence_output)
-# 			end
-# 		else
-# 			usable_covariates = ops[:o_covariates]
-# 		end
-
-# 		if .|(is_group_one_zero_logical...)
-# 			usable_covariates = usable_covariates[:, 2:end]
-# 		end
-
-# 		return usable_covariates
-# 	end
-# end
-
 function CosineFit(eP, dataFile, ops)
    	gea = MakeFloat(dataFile[ops[:o_fxr]:end, 2:end], Float64)
 	lin_range_shifts = LinRange(0, 2π, ops[:cosine_shift_iterations])   
@@ -3362,7 +3312,7 @@ function CosineFit(eP, dataFile, ops)
     best_shift_info = findmin(all_lin_SSEs, dims = 2)
     LinSSEs = best_shift_info[1]
     best_shift_index = map(x -> x[2], best_shift_info[2])
-    best_shift = lin_range_shifts[best_shift_index] # made the linrange a variable so that I can index directly. No confusion this way.
+    best_shift = lin_range_shifts[best_shift_index]
     gene_rows = mapslices(x -> [x], gea, dims = 2)
     cosLinSSEs = []
     map(best_shift, gene_rows) do EachShift, EachGene
@@ -3462,7 +3412,6 @@ function GetCosSSELineAttributes(eP, gea, ops, s::Float64 = 0)
 	predicted_values = m_coeffs * gradient_terms' .+ b_coeffs * b_terms'
 	SSE = sse(gea, predicted_values, dims = 2)
 	Amplitude = sqrt.((sin_m_coeffs .^ 2) .+ (cos_m_coeffs .^ 2))
-	# sum([size(covariates_0_check(ops)[(sum(covariates_0_check(ops), dims=2) .== ii)[:], :], 1) for ii in unique(sum(covariates_0_check(ops), dims=2))]) usable_covariates returns
 	AmplitudeRatio = Amplitude ./ Weighted_Average_Offset
 	OffsetPlusMinusAmplitudeRatio = (Amplitude .+ Weighted_Average_Offset) ./ (Weighted_Average_Offset .- Amplitude)
 	Acrophase = mod.(atan.(sin_m_coeffs, cos_m_coeffs), 2pi)
@@ -4199,18 +4148,7 @@ function GeneTracing(GOI::Array{String, 1}, dataFile::DataFrame, fitoutput::Data
 	existing_goi = GOI[only_existing_goi_indices_logical]
 	all_indices_for_each_existing_goi = all_indices_fo_each_goi[only_existing_goi_indices_logical]
 	all_indices_for_goi = vcat(all_indices_for_existing_goi...)
-	#=
-	if ops[:plot_only_best]
-		best_indices_for_goi = Array{Any}([])
-		for ii in all_indices_for_each_existing_goi
-			keep_according_to_p_value = cosoutput[ii, :P_Statistic] .< ops[:plot_p_cutoff]
-			amplitude_ratio_for_gene = cosoutput[ii, :Amplitude_Ratio]
-			best_index = sum(keep_according_to_p_value) > 1 ? findmax(amplitude_ratio_for_gene[keep_according_to_p_value])[2][2] : (sum(keep_according_to_p_value) > 0 ? findall(keep_according_to_p_value) : findmax(amplitude_ratio_for_gene)[2][2])
-			append!(best_indices_for_goi, best_index)
-		end
-		all_indices_for_goi = best_indices_for_goi
-	end
-	=#
+
 	for ii in all_indices_for_goi
 		xs = fitoutput.Phase
 		xs_sorted, sort_index = x_sort(xs)
@@ -4307,11 +4245,6 @@ function GeneTracing(GOI::Array{String,1}, dataFile::DataFrame, Phase::Array{Flo
 		end
 		
 		Acrophase_this_gene = goi_info[ii, :Acrophase]
-		# Acrophase_string_this_gene = "$(trunc(Acrophase_this_gene/π, digits = 2))π"
-		# xticks([0, π, 2π, Acrophase_this_gene], ["0", "π", "2π", (Acrophase_this_gene < space_factor) | ((Acrophase_this_gene > π-space_factor) & (Acrophase_this_gene < π+space_factor)) | (Acrophase_this_gene > 2π-space_factor) ? "" : Acrophase_string_this_gene])
-		# if ii > number_subplot_columns
-		# 	xlabel("Estimated Phase")
-		# end
 		
 		Amplitude_this_gene = goi_info[ii, :Amplitude]
 		Amplitude_ratio_this_gene = goi_info[ii, :Amplitude_Ratio]
