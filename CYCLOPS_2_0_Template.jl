@@ -2,7 +2,7 @@ using DataFrames, Statistics, StatsBase, LinearAlgebra, MultivariateStats, PyPlo
 
 base_path = "/home/xuzhen/CYCLOPS-2.0"
 data_path = "/home/xuzhen/CYCLOPS-2.0/data/"
-dataset_path_1 = "Merge_GSE_ZhangYY"
+dataset_path_1 = "Merge_rna5_ZhangYY"
 dataset_path_2 = "Zhang_CancerCell_2025.Sample_MajorCluster"
 path_to_cyclops = joinpath(base_path, "CYCLOPS.jl")
 output_path = joinpath(base_path, "output")
@@ -35,10 +35,8 @@ seed_genes = readlines(joinpath(data_path, "seed_genes.txt"))
 #                             4.188790,4.188790,         4.188790]
 # sample_ids_with_collection_times = ["Sample_6", "Sample_16", "Sample_26", "Sample_34"]
 # sample_collection_times = [1.047198, 2.617994, 5.759587, 4.188790]
-sample_ids_with_collection_times = ["SL01", "SL03", "SL05", "SL07", "SL09", "SL11", "SL13", "SL15", "SL17", "SL21", "SL23", "SL25", "SL27", "SL29", "SL31", "SL33", "SL35", "SL37", "SL39", "SL41", "SL43", "SL45", "SL47", "SL49", "SL51", "SL53", "SL55", "SL57", "SL59", "SL61", "SL63", "SL65", "SL67", "SL69", "SL71", "SL73", "SL75", "SL77", "SL79", "SL81", "SL83", "SL85"]
-sample_collection_times = [3.839724, 3.621558, 3.054326, 2.683444, 4.166974, 3.953171, 3.141593, 3.207043, 4.276057, 4.38514, 4.232423, 2.792527, 3.621558, 3.403392, 3.621558, 2.958333, 3.926991, 4.494223, 4.145157, 3.337942, 3.119776, 2.853613, 3.381575, 2.814343, 3.381575, 4.014257, 4.363323, 2.727077, 4.101524, 3.076143, 3.468842, 4.180064, 4.341507, 4.210607, 3.272492, 4.166974, 3.447025, 3.621558, 3.228859, 2.63981, 4.38514, 4.46368]
-# println("Number of sample ids provided: ", length(sample_ids_with_collection_times))
-# println("Number of collection times provided: ", length(sample_collection_times))
+sample_ids_with_collection_times = []
+sample_collection_times = []
 if ((length(sample_ids_with_collection_times)+length(sample_collection_times))>0) && (length(sample_ids_with_collection_times) != length(sample_collection_times))
     error("ATTENTION REQUIRED! Number of sample ids provided (\'sample_ids_with_collection_times\') must match number of collection times (\'sample_collection_times\').")
 end
@@ -107,8 +105,8 @@ training_parameters = Dict(:regex_cont => r".*_C",			# What is the regex match f
 :align_disc_cov => 1,							# Which discontinuous covariate is used to choose samples to separately align (is an integer)
 :align_other_covariates => false,				# Are other covariates included
 :align_batch_only => false,
-:align_samples => sample_ids_with_collection_times,
-:align_phases => sample_collection_times,
+# :align_samples => sample_ids_with_collection_times,
+# :align_phases => sample_collection_times,
 # :align_genes => Array{String, 1},				# A string array of genes used to align CYCLOPS fit output. Goes together with :align_acrophases
 # :align_acrophases => Array{<: Number, 1}, 	# A number array of acrophases for each gene used to align CYCLOPS fit output. Goes together with :align_genes
 
@@ -133,10 +131,10 @@ end
 # real training run
 training_parameters[:align_genes] = CYCLOPS.human_homologue_gene_symbol[CYCLOPS.human_homologue_gene_symbol .!= "RORC"]
 training_parameters[:align_acrophases] = CYCLOPS.mouse_acrophases[CYCLOPS.human_homologue_gene_symbol .!= "RORC"]
-eigendata, metricDataframe_1, correlationDataframe_1, bestmodel, dataFile1_ops = CYCLOPS.Fit(expression_data_1, seed_genes, training_parameters)
-CYCLOPS.Align(expression_data_1, metricDataframe_1, correlationDataframe_1, bestmodel, dataFile1_ops, output_path)
-dataFile2_transform, metricDataframe_2, correlationDataframe_2, best_model, dataFile2_ops = CYCLOPS.ReApplyFit(bestmodel, expression_data_1, expression_data_2, seed_genes, training_parameters)
-CYCLOPS.Align(expression_data_1, expression_data_2, metricDataframe_1, metricDataframe_2, correlationDataframe_2, bestmodel, dataFile1_ops, dataFile2_ops, output_path)
+# eigendata, metricDataframe_1, correlationDataframe_1, bestmodel, dataFile1_ops = CYCLOPS.Fit(expression_data_1, seed_genes, training_parameters)
+# CYCLOPS.Align(expression_data_1, metricDataframe_1, correlationDataframe_1, bestmodel, dataFile1_ops, output_path)
+# dataFile2_transform, metricDataframe_2, correlationDataframe_2, best_model, dataFile2_ops = CYCLOPS.ReApplyFit(bestmodel, expression_data_1, expression_data_2, seed_genes, training_parameters)
+# CYCLOPS.Align(expression_data_1, expression_data_2, metricDataframe_1, metricDataframe_2, correlationDataframe_2, bestmodel, dataFile1_ops, dataFile2_ops, output_path)
 
-# eigendata, metricDataframe, correlationDataframe, bestmodel, dataFile_ops = CYCLOPS.Fit(expression_data_2, seed_genes, training_parameters)
-# CYCLOPS.Align(expression_data_2, metricDataframe, correlationDataframe, bestmodel, dataFile_ops, output_path)
+eigendata, metricDataframe, correlationDataframe, bestmodel, dataFile_ops = CYCLOPS.Fit(expression_data_2, seed_genes, training_parameters)
+CYCLOPS.Align(expression_data_2, metricDataframe, correlationDataframe, bestmodel, dataFile_ops, output_path)
