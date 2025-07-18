@@ -8,8 +8,8 @@ export CosineFit # Currently named CYCLOPS_original_post_process_no_covariates a
 
 using DataFrames, Statistics, StatsBase, LinearAlgebra, MultivariateStats, Flux, PyPlot, Distributed, Random, CSV, Revise, Distributions, Dates, MultipleTesting
 import Flux: onehot, onehotbatch, mse
-hidden_dim1 = 8
-hidden_dim2 = 8
+hidden_dim1 = 32
+hidden_dim2 = 32
 const mouse_acrophases = [
 	0, 
 	0.0790637050481884, 
@@ -225,7 +225,9 @@ struct Covariates
     B		
     B_OH	
     L1
+	L1_mid
     L2
+	L2_mid
     o   	
 end
 
@@ -264,9 +266,11 @@ end
 
 function (m::Covariates)(x::Array{Float32,1})
     Encoding_Onehot = x[1:m.o] .* (1 .+ (m.S_OH * x[m.o + 1:end])) .+ (m.B_OH * x[m.o + 1:end]) .+ m.B
-    Fully_Connected_Encoding = m.L1(Encoding_Onehot)
-	Cicular_Layer = CircularNode(Fully_Connected_Encoding)
-	Fully_Connected_Decoding = m.L2(Cicular_Layer)
+    mid_vec = relu(m.L1(Encoding_Onehot))
+	Fully_Connected_Encoding = m.L1_mid(mid_vec)
+	Circular_Layer = CircularNode(Fully_Connected_Encoding)
+	mid_vec = relu(m.L2(Circular_Layer))
+	Fully_Connected_Decoding = m.L2_mid(mid_vec)
 	Decoding_Onehot = ((Fully_Connected_Decoding .- (m.B_OH * x[m.o + 1:end]) .- m.B) ./ (1 .+ (m.S_OH * x[m.o + 1:end])))
 	return Decoding_Onehot
 end
@@ -340,7 +344,7 @@ function CovariatesDecodingOH(x::Array{Array{Float32,1}, 2}, y::Array{Float32,2}
 end
 
 function CovariatesEncodingDense(x::Array{Float32,1}, m::Covariates)
-	return m.L1(x)
+	return m.L1_mid(relu(m.L1(x)))
 end
 
 function CovariatesEncodingDense(x::Array{Float32,2}, m::Covariates)
@@ -356,7 +360,7 @@ function CovariatesEncodingDense(x::Array{Array{Float32,1},1}, m::Covariates)
 end
 
 function CovariatesDecodingDense(x::Array{Float32,1}, m::Covariates)
-	return m.L2(x)
+	return m.L2_mid(relu(m.L2(x)))
 end
 
 function CovariatesDecodingDense(x::Array{Float32,2}, m::Covariates)
@@ -827,8 +831,10 @@ function InitializeModel(eigen_data, options)
 										Array{Float32}(use_S_OH), 
 										Array{Float32}(use_B), 
 										Array{Float32}(use_B_OH), 
-										Dense(options[:o_svd_n_dims], 2),
-										Dense(2, options[:o_svd_n_dims]),
+										Dense(options[:o_svd_n_dims], hidden_dim1),
+										Dense(hidden_dim1, 2),
+										Dense(2, hidden_dim2),
+										Dense(hidden_dim2, options[:o_svd_n_dims]),
 										options[:o_svd_n_dims]
 									)])
 		end
@@ -858,7 +864,7 @@ end
 function CovariatesProjection(model, ohEigenData, OUT_TYPE = Float64)
 	m = model
 	OH(x) = x[1:m.o] .* (1 .+ (m.S_OH * x[m.o + 1:end])) .+ (m.B_OH * x[m.o + 1:end]) .+ m.B
-	Lin(x) = m.L1(x)
+	Lin(x) = m.L1_mid(relu(m.L1(x)))
 	M(x) = Lin(OH(x))
 	projections = zeros(size(ohEigenData, 2), 2)
 	for ii in 1:size(projections, 1)
@@ -871,7 +877,7 @@ end
 function CovariatesMagnitude(model, ohEigenData, OUT_TYPE = Float64)
 	m = model
 	OH(x) = x[1:m.o] .* (1 .+ (m.S_OH * x[m.o + 1:end])) .+ (m.B_OH * x[m.o + 1:end]) .+ m.B
-	Lin(x) = m.L1(x)
+	Lin(x) = m.L1_mid(relu(m.L1(x)))
 	M(x) = Lin(OH(x))
 	magnitudes = zeros(size(ohEigenData, 2))
 	for ii in 1:length(magnitudes)
@@ -1309,7 +1315,7 @@ function TrainCovariates(
 			before_m = deepcopy(m)
 			Flux.train!(
 				x->mse(m(x), x[1:m.o]),
-				Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L2),
+				Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L1_mid, m.L2, m.L2_mid),
 				zip(gea_vectorized),
 				ADAM(μA, β),
 				cb = () -> ()
@@ -1324,7 +1330,7 @@ function TrainCovariates(
 				m = before_m
 				Flux.train!(
 					x->mse(m(x), x[1:m.o]), 
-					Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L2), 
+					Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L1_mid, m.L2, m.L2_mid),
 					zip(gea_vectorized), 
 					ADAM(μA, β), 
 					cb = () -> ()
@@ -1390,11 +1396,11 @@ function TrainCovariatesTrueTimes(
 	end
 	
 	function AfterCircularLayer(x_l)
-		return CircularNode(m.L1(EncodingOHLayer(x_l)))
+		return CircularNode(m.L1_mid(relu(m.L1(EncodingOHLayer(x_l)))))
 	end
 	
 	function AfterDecodingDense(x_l)
-		return m.L2(AfterCircularLayer(x_l))
+		return m.L2_mid(relu(m.L2(AfterCircularLayer(x_l))))
 	end
 	
 	function MSELoss(x_l)
@@ -1436,7 +1442,7 @@ function TrainCovariatesTrueTimes(
 			c1 += 1
 			Flux.train!(
                 (x, y) -> TotalLoss2(x, y, collection_time_balance),
-                Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L2), 
+                Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L1_mid, m.L2, m.L2_mid), 
                 zip_data, 
                 ADAM(μA, β), 
                 cb = () -> ()
@@ -1456,7 +1462,7 @@ function TrainCovariatesTrueTimes(
 			before_m = deepcopy(m)
 			Flux.train!(
                 (x, y) -> TotalLoss2(x, y, collection_time_balance), 
-                Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L2), 
+                Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L1_mid, m.L2, m.L2_mid), 
                 zip_data, 
                 ADAM(μA, β), 
                 cb = () -> ()
@@ -1471,7 +1477,7 @@ function TrainCovariatesTrueTimes(
 				m = before_m
 				Flux.train!(
                     (x, y) -> TotalLoss2(x, y, collection_time_balance), 
-                    Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L2), 
+                    Flux.params(m.S_OH, m.B, m.B_OH, m.L1, m.L1_mid, m.L2, m.L2_mid), 
                     zip_data, 
                     ADAM(μA, β), 
                     cb = () -> ()
