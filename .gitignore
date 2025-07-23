@@ -27,3 +27,5 @@ data
 output
 
 *.sh
+
+phase_autoencoder_results
