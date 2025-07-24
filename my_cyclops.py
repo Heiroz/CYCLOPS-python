@@ -33,29 +33,13 @@ class PhaseAutoEncoder(nn.Module):
     def __init__(self, input_dim, dropout=0.2):
         super(PhaseAutoEncoder, self).__init__()
         self.input_dim = input_dim
-        self.dropout = dropout
 
-        self.encoder = nn.Sequential(
-            nn.Linear(input_dim, 512),
-            nn.BatchNorm1d(512),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(512, 2)
-        )
-
-        self.decoder = nn.Sequential(
-            nn.Linear(2, 512),
-            nn.BatchNorm1d(512),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(512, input_dim)
-        )
+        self.encoder = nn.Linear(input_dim, 2)
+        self.decoder = nn.Linear(2, input_dim)
     
     def forward(self, x):
         phase_coords = self.encoder(x)
-        
         reconstructed = self.decoder(phase_coords)
-        
         return phase_coords, reconstructed
     
     def encode(self, x):
@@ -121,7 +105,7 @@ def load_and_preprocess_train_data(train_file, n_components=50, max_samples=100,
     print(f"基于训练集进行奇异值分解，选择前 {n_components} 个最重要的基因...")
     U, s, Vt = np.linalg.svd(expression_scaled.T, full_matrices=False)
     
-    n_top_components = min(10, len(s))
+    n_top_components = min(n_components, len(s))
     gene_importance = np.sum(np.abs(U[:, :n_top_components]) * s[:n_top_components], axis=1)
     
     top_gene_indices = np.argsort(gene_importance)[-n_components:][::-1]
@@ -132,7 +116,7 @@ def load_and_preprocess_train_data(train_file, n_components=50, max_samples=100,
         print(f"样本数量 ({n_samples}) 超过最大限制 ({max_samples})，进行截断...")
         np.random.seed(random_state)
         selected_indices = np.random.choice(n_samples, max_samples, replace=False)
-        selected_indices = np.sort(selected_indices)  # 保持原有顺序
+        selected_indices = np.sort(selected_indices)
         
         selected_expression = selected_expression[selected_indices]
         if times is not None:
@@ -233,12 +217,11 @@ def load_and_preprocess_test_data(test_file, preprocessing_info):
     
     print("使用训练集的标准化参数处理测试数据...")
     test_expression_scaled = scaler.transform(test_expression_data)
-    
-    # 构建对应的测试集表达矩阵
+
     test_selected_expression = np.zeros((n_samples, n_components))
     missing_genes = []
     found_genes = []
-    
+
     for train_idx, gene in enumerate(selected_genes):
         if gene in test_gene_names:
             test_gene_idx = np.where(test_gene_names == gene)[0][0]
@@ -246,7 +229,6 @@ def load_and_preprocess_test_data(test_file, preprocessing_info):
             found_genes.append(gene)
         else:
             missing_genes.append(gene)
-            # 对于缺失的基因，使用0填充
             test_selected_expression[:, train_idx] = 0
     
     print(f"测试集中找到的基因数量: {len(found_genes)}")
@@ -254,10 +236,8 @@ def load_and_preprocess_test_data(test_file, preprocessing_info):
         print(f"测试集中缺失的基因数量: {len(missing_genes)}")
         print(f"缺失基因样例: {missing_genes[:5]}")
     
-    # 创建测试数据集
     test_dataset = ExpressionDataset(test_selected_expression, times, celltypes)
     
-    # 更新preprocessing_info
     test_preprocessing_info = preprocessing_info.copy()
     test_preprocessing_info.update({
         'test_has_time': has_time,
@@ -286,18 +266,13 @@ def sine_prior_loss(phase_coords, celltypes, celltype_to_idx, lambda_sine=1.0):
         celltype_coords = phase_coords[mask]
         phases = coords_to_phase(celltype_coords)
         
-        # 计算相位分布的统计特性（与正弦函数对比）
         sin_values = torch.sin(phases)
         cos_values = torch.cos(phases)
         
-        # 目标1：均值接近0（正弦函数在完整周期内均值为0）
         mean_sin = torch.mean(sin_values)
         mean_cos = torch.mean(cos_values)
         
-        # 目标2：自相关匹配（可选）
-        # 例如：E[sin(θ)cos(θ)] ≈ 0（正弦函数的正交性）
-        
-        loss = mean_sin**2 + mean_cos**2  # 越小越好（均值为0时loss=0）
+        loss = mean_sin**2 + mean_cos**2
         total_loss += loss
         count += 1
     
@@ -438,7 +413,7 @@ def train_model(model, train_dataset, preprocessing_info,
                     'LR': f'{scheduler.get_last_lr()[0]:.6f}'
                 })
             
-            if (epoch + 1) % 100 == 0:
+            if (epoch + 1) % 1000 == 0:
                 checkpoint = {
                     'epoch': epoch + 1,
                     'model_state_dict': model.state_dict(),
@@ -636,6 +611,238 @@ def create_prediction_plots(results_df, save_dir):
     
     print(f"预测分析图表保存到: {os.path.join(save_dir, 'prediction_analysis.png')}")
 
+def plot_gene_expression_by_phase(model, test_loader, preprocessing_info, device='cuda', save_dir='./results', n_genes_to_plot=10):
+    """绘制基因表达量随预测相位变化的图表"""
+    print("\n=== 绘制基因表达相位图 ===")
+    model.eval()
+    
+    all_expressions = []
+    all_phase_hours = []
+    all_celltypes = []
+    
+    # 收集预测数据
+    with torch.no_grad():
+        for batch in test_loader:
+            expressions = batch['expression'].to(device)
+            celltypes = batch.get('celltype', None)
+            
+            # 获取预测相位
+            phase_coords, _ = model(expressions)
+            phases = coords_to_phase(phase_coords)
+            phase_hours = phases.cpu().numpy() * preprocessing_info.get('period_hours', 24.0) / (2 * np.pi)
+            
+            all_expressions.append(expressions.cpu().numpy())
+            all_phase_hours.append(phase_hours)
+            
+            if celltypes is not None:
+                all_celltypes.extend(celltypes)
+    
+    # 合并数据
+    expressions_data = np.vstack(all_expressions)
+    phase_hours_data = np.concatenate(all_phase_hours)
+    
+    if all_celltypes:
+        celltypes_data = np.array(all_celltypes)
+        unique_celltypes = np.unique(celltypes_data)
+        print(f"发现细胞类型: {unique_celltypes}")
+    else:
+        celltypes_data = None
+        unique_celltypes = ['All_Samples']
+    
+    # 获取重要基因信息
+    selected_genes = preprocessing_info['selected_genes']
+    n_genes_to_plot = min(n_genes_to_plot, len(selected_genes))
+    top_genes = selected_genes[:n_genes_to_plot]
+    
+    print(f"绘制前 {n_genes_to_plot} 个最重要基因的表达图")
+    print(f"基因列表: {top_genes}")
+    
+    # 创建相位分箱
+    n_bins = 24  # 每小时一个分箱
+    phase_bins = np.linspace(0, 24, n_bins + 1)
+    phase_centers = (phase_bins[:-1] + phase_bins[1:]) / 2
+    
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # 为每个细胞类型创建图表
+    if celltypes_data is not None:
+        # 按细胞类型分别绘制
+        for celltype in unique_celltypes:
+            if celltype == 'PADDING':
+                continue
+                
+            celltype_mask = celltypes_data == celltype
+            celltype_expressions = expressions_data[celltype_mask]
+            celltype_phases = phase_hours_data[celltype_mask]
+            
+            if len(celltype_expressions) < 10:  # 样本太少跳过
+                continue
+            
+            plot_celltype_gene_expression(
+                celltype_expressions, celltype_phases, top_genes, 
+                phase_centers, phase_bins, celltype, save_dir
+            )
+    else:
+        # 所有样本一起绘制
+        plot_celltype_gene_expression(
+            expressions_data, phase_hours_data, top_genes, 
+            phase_centers, phase_bins, 'All_Samples', save_dir
+        )
+    
+    # 创建综合对比图
+    if celltypes_data is not None and len(unique_celltypes) > 1:
+        plot_celltype_comparison(
+            expressions_data, phase_hours_data, celltypes_data, top_genes,
+            phase_centers, phase_bins, unique_celltypes, save_dir
+        )
+
+def plot_celltype_gene_expression(expressions, phase_hours, gene_names, phase_centers, phase_bins, celltype, save_dir):
+    """为单个细胞类型绘制基因表达图"""
+    n_genes = len(gene_names)
+    
+    # 计算每个相位分箱的平均表达量和标准误差
+    binned_expressions = np.zeros((len(phase_centers), n_genes))
+    binned_std = np.zeros((len(phase_centers), n_genes))
+    binned_counts = np.zeros(len(phase_centers))
+    
+    for i, (start, end) in enumerate(zip(phase_bins[:-1], phase_bins[1:])):
+        mask = (phase_hours >= start) & (phase_hours < end)
+        if mask.sum() > 0:
+            binned_expressions[i] = np.mean(expressions[mask], axis=0)
+            binned_std[i] = np.std(expressions[mask], axis=0) / np.sqrt(mask.sum())  # 标准误差
+            binned_counts[i] = mask.sum()
+    
+    # 创建图表
+    fig, axes = plt.subplots(2, 5, figsize=(20, 8))
+    axes = axes.flatten()
+    
+    for gene_idx in range(min(n_genes, 10)):
+        ax = axes[gene_idx]
+        
+        # 绘制表达量曲线
+        valid_mask = binned_counts > 0
+        x_data = phase_centers[valid_mask]
+        y_data = binned_expressions[valid_mask, gene_idx]
+        y_err = binned_std[valid_mask, gene_idx]
+        
+        # 主要曲线
+        ax.plot(x_data, y_data, 'o-', linewidth=2, markersize=4, alpha=0.8, label='Expression')
+        ax.fill_between(x_data, y_data - y_err, y_data + y_err, alpha=0.3)
+        
+        # 尝试拟合正弦曲线
+        if len(x_data) > 5:
+            try:
+                # 正弦拟合
+                def sine_func(x, amplitude, phase_shift, offset):
+                    return amplitude * np.sin(2 * np.pi * x / 24 + phase_shift) + offset
+                
+                from scipy.optimize import curve_fit
+                popt, _ = curve_fit(sine_func, x_data, y_data, maxfev=2000)
+                
+                # 绘制拟合曲线
+                x_fit = np.linspace(0, 24, 100)
+                y_fit = sine_func(x_fit, *popt)
+                ax.plot(x_fit, y_fit, '--', color='red', alpha=0.7, label='Sine Fit')
+                
+                # 显示拟合参数
+                amplitude, phase_shift, offset = popt
+                peak_time = (-phase_shift * 24 / (2 * np.pi)) % 24
+                ax.text(0.02, 0.98, f'Peak: {peak_time:.1f}h\nAmp: {amplitude:.3f}', 
+                       transform=ax.transAxes, verticalalignment='top', fontsize=8,
+                       bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+                
+            except Exception as e:
+                print(f"拟合失败 {gene_names[gene_idx]}: {e}")
+        
+        ax.set_title(f'{gene_names[gene_idx]}', fontsize=10)
+        ax.set_xlabel('Predicted Phase (Hours)')
+        ax.set_ylabel('Expression Level')
+        ax.grid(True, alpha=0.3)
+        ax.set_xlim(0, 24)
+        
+        # 设置x轴刻度
+        ax.set_xticks([0, 6, 12, 18, 24])
+        
+        if gene_idx == 0:
+            ax.legend(fontsize=8)
+    
+    # 隐藏多余的子图
+    for gene_idx in range(n_genes, 10):
+        axes[gene_idx].set_visible(False)
+    
+    plt.suptitle(f'Gene Expression vs Predicted Phase - {celltype}', fontsize=14)
+    plt.tight_layout()
+    
+    filename = f'gene_expression_phase_{celltype}.png'
+    filepath = os.path.join(save_dir, filename)
+    plt.savefig(filepath, dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"基因表达相位图已保存: {filepath}")
+
+def plot_celltype_comparison(expressions, phase_hours, celltypes, gene_names, phase_centers, phase_bins, unique_celltypes, save_dir):
+    """绘制不同细胞类型的基因表达对比图"""
+    print("绘制细胞类型对比图...")
+    
+    # 选择前4个最重要的基因进行对比
+    top_4_genes = gene_names[:4]
+    
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    axes = axes.flatten()
+    
+    colors = plt.cm.tab10(np.linspace(0, 1, len(unique_celltypes)))
+    
+    for gene_idx, gene_name in enumerate(top_4_genes):
+        ax = axes[gene_idx]
+        
+        for celltype_idx, celltype in enumerate(unique_celltypes):
+            if celltype == 'PADDING':
+                continue
+                
+            celltype_mask = celltypes == celltype
+            celltype_expressions = expressions[celltype_mask]
+            celltype_phases = phase_hours[celltype_mask]
+            
+            if len(celltype_expressions) < 5:
+                continue
+            
+            # 计算分箱平均值
+            binned_expr = np.zeros(len(phase_centers))
+            binned_counts = np.zeros(len(phase_centers))
+            
+            for i, (start, end) in enumerate(zip(phase_bins[:-1], phase_bins[1:])):
+                mask = (celltype_phases >= start) & (celltype_phases < end)
+                if mask.sum() > 0:
+                    binned_expr[i] = np.mean(celltype_expressions[mask, gene_idx])
+                    binned_counts[i] = mask.sum()
+            
+            # 绘制曲线
+            valid_mask = binned_counts > 0
+            if valid_mask.sum() > 3:
+                x_data = phase_centers[valid_mask]
+                y_data = binned_expr[valid_mask]
+                
+                ax.plot(x_data, y_data, 'o-', color=colors[celltype_idx], 
+                       label=celltype, linewidth=2, markersize=4, alpha=0.8)
+        
+        ax.set_title(f'{gene_name}', fontsize=12)
+        ax.set_xlabel('Predicted Phase (Hours)')
+        ax.set_ylabel('Expression Level')
+        ax.grid(True, alpha=0.3)
+        ax.set_xlim(0, 24)
+        ax.set_xticks([0, 6, 12, 18, 24])
+        ax.legend(fontsize=8)
+    
+    plt.suptitle('Gene Expression Comparison Across Cell Types', fontsize=16)
+    plt.tight_layout()
+    
+    filename = 'gene_expression_celltype_comparison.png'
+    filepath = os.path.join(save_dir, filename)
+    plt.savefig(filepath, dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"细胞类型对比图已保存: {filepath}")
+
 def main():
     parser = argparse.ArgumentParser(description="训练相位自编码器模型")
     parser.add_argument("--train_file", required=True, help="训练数据文件路径")
@@ -643,15 +850,16 @@ def main():
     parser.add_argument("--n_components", type=int, default=50, help="选择的重要基因数量")
     parser.add_argument("--max_samples", type=int, default=100, help="最大样本数量（超过则截断，不足则填充）")
     parser.add_argument("--num_epochs", type=int, default=100, help="训练轮数")
-    parser.add_argument("--lr", type=float, default=0.00001, help="学习率")
+    parser.add_argument("--lr", type=float, default=0.0001, help="学习率")
     parser.add_argument("--lambda_recon", type=float, default=1.0, help="重建损失权重")
     parser.add_argument("--lambda_time", type=float, default=0.5, help="时间监督损失权重")
-    parser.add_argument("--lambda_sine", type=float, default=0.1, help="正弦先验损失权重")
+    parser.add_argument("--lambda_sine", type=float, default=0.5, help="正弦先验损失权重")
     parser.add_argument("--period_hours", type=float, default=24.0, help="预期周期（小时）")
     parser.add_argument("--dropout", type=float, default=0.2, help="Dropout比例")
     parser.add_argument("--device", default='cuda', help="设备 (cuda/cpu)")
     parser.add_argument("--save_dir", default='./phase_autoencoder_results', help="保存目录")
     parser.add_argument("--random_seed", type=int, default=42, help="随机种子")
+    parser.add_argument("--n_genes_plot", type=int, default=10, help="绘制的基因数量")
     
     args = parser.parse_args()
     
@@ -676,7 +884,6 @@ def main():
     
     preprocessing_info['period_hours'] = args.period_hours
     
-    # 不再使用DataLoader，直接传入dataset
     model = PhaseAutoEncoder(
         input_dim=args.n_components,
         dropout=args.dropout
@@ -686,7 +893,7 @@ def main():
     
     train_losses = train_model(
         model=model,
-        train_dataset=train_dataset,  # 直接传入dataset而不是loader
+        train_dataset=train_dataset,
         preprocessing_info=preprocessing_info,
         num_epochs=args.num_epochs,
         lr=args.lr,
@@ -718,7 +925,6 @@ def main():
             args.test_file, preprocessing_info
         )
         
-        # 测试阶段仍使用DataLoader，因为测试样本可能很多
         test_loader = DataLoader(test_dataset, batch_size=1000, shuffle=False)
         
         prediction_results = predict_and_save_phases(
@@ -729,6 +935,17 @@ def main():
             save_dir=args.save_dir
         )
         
+        # 新增：绘制基因表达相位图
+        print(f"\n=== 绘制基因表达相位图 ===")
+        plot_gene_expression_by_phase(
+            model=model,
+            test_loader=test_loader,
+            preprocessing_info=test_preprocessing_info,
+            device=args.device,
+            save_dir=args.save_dir,
+            n_genes_to_plot=args.n_genes_plot
+        )
+        
         print(f"\n=== 测试完成 ===")
         print(f"主要输出文件:")
         print(f"  - 模型权重: {args.save_dir}/final_model.pth")
@@ -736,6 +953,8 @@ def main():
         print(f"  - 简化预测: {args.save_dir}/phase_predictions_simple.csv")
         print(f"  - 训练曲线: {args.save_dir}/training_curves.png")
         print(f"  - 预测分析: {args.save_dir}/prediction_analysis.png")
+        print(f"  - 基因表达相位图: {args.save_dir}/gene_expression_phase_*.png")
+        print(f"  - 细胞类型对比图: {args.save_dir}/gene_expression_celltype_comparison.png")
     else:
         print(f"\n未提供测试文件，只完成训练阶段")
         print(f"主要输出文件:")
