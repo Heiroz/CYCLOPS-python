@@ -78,141 +78,6 @@ def phase_to_coords(phase):
 def time_to_phase(time_hours, period_hours=24.0):
     return 2 * np.pi * time_hours / period_hours
 
-def train_model(model, train_loader, val_loader, preprocessing_info, 
-                num_epochs=100, lr=0.001, device='cuda',
-                lambda_recon=1.0, lambda_time=0.5, lambda_sine=0.1,
-                period_hours=24.0, save_dir='./model_checkpoints'):
-    
-    model = model.to(device)
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=10, factor=0.5)
-    
-    recon_criterion = nn.MSELoss()
-    
-    train_losses = []
-    val_losses = []
-    
-    if preprocessing_info['train_has_celltype']:
-        all_celltypes = []
-        for batch in train_loader:
-            if 'celltype' in batch:
-                all_celltypes.extend(batch['celltype'])
-        unique_celltypes = list(set(all_celltypes))
-        celltype_to_idx = {ct: idx for idx, ct in enumerate(unique_celltypes)}
-    else:
-        celltype_to_idx = {}
-    
-    os.makedirs(save_dir, exist_ok=True)
-    
-    print("开始训练...")
-    with tqdm(total=num_epochs, desc="Training Progress") as pbar:
-        for epoch in range(num_epochs):
-            model.train()
-            train_loss_epoch = 0.0
-            train_recon_loss_epoch = 0.0
-            train_time_loss_epoch = 0.0
-            train_sine_loss_epoch = 0.0
-
-            for batch in train_loader:
-                expressions = batch['expression'].to(device)
-                times = batch.get('time', None)
-                celltypes = batch.get('celltype', None)
-
-                if times is not None:
-                    times = times.to(device)
-
-                optimizer.zero_grad()
-
-                phase_coords, reconstructed = model(expressions)
-                recon_loss = recon_criterion(reconstructed, expressions)
-                
-                time_loss = torch.tensor(0.0, device=device)
-                if preprocessing_info['train_has_time'] and times is not None:
-                    time_loss = time_supervision_loss(phase_coords, times, 1.0, period_hours)
-                
-                sine_loss = torch.tensor(0.0, device=device)
-                if preprocessing_info['train_has_celltype'] and celltypes is not None:
-                    sine_loss = sine_prior_loss(phase_coords, celltypes, celltype_to_idx, 1.0)
-
-                total_loss = lambda_recon * recon_loss + lambda_time * time_loss + lambda_sine * sine_loss
-                total_loss.backward()
-                optimizer.step()
-
-                train_loss_epoch += total_loss.item()
-                train_recon_loss_epoch += recon_loss.item()
-                train_time_loss_epoch += time_loss.item()
-                train_sine_loss_epoch += sine_loss.item()
-
-            model.eval()
-            val_loss_epoch = 0.0
-            val_recon_loss_epoch = 0.0
-            val_time_loss_epoch = 0.0
-            val_sine_loss_epoch = 0.0
-            
-            with torch.no_grad():
-                for batch in val_loader:
-                    expressions = batch['expression'].to(device)
-                    times = batch.get('time', None)
-                    celltypes = batch.get('celltype', None)
-
-                    if times is not None:
-                        times = times.to(device)
-
-                    phase_coords, reconstructed = model(expressions)
-                    recon_loss = recon_criterion(reconstructed, expressions)
-                    
-                    time_loss = torch.tensor(0.0, device=device)
-                    if preprocessing_info['train_has_time'] and times is not None:
-                        time_loss = time_supervision_loss(phase_coords, times, 1.0, period_hours)
-                    
-                    sine_loss = torch.tensor(0.0, device=device)
-                    if preprocessing_info['train_has_celltype'] and celltypes is not None:
-                        sine_loss = sine_prior_loss(phase_coords, celltypes, celltype_to_idx, 1.0)
-
-                    total_loss = lambda_recon * recon_loss + lambda_time * time_loss + lambda_sine * sine_loss
-
-                    val_loss_epoch += total_loss.item()
-                    val_recon_loss_epoch += recon_loss.item()
-                    val_time_loss_epoch += time_loss.item()
-                    val_sine_loss_epoch += sine_loss.item()
-
-            train_loss_avg = train_loss_epoch / len(train_loader)
-            val_loss_avg = val_loss_epoch / len(val_loader)
-
-            train_losses.append(train_loss_avg)
-            val_losses.append(val_loss_avg)
-
-            scheduler.step(val_loss_avg)
-
-            if (epoch + 1) % 10 == 0:
-                pbar.set_postfix({
-                    'Train loss': f'{train_loss_avg:.4f}',
-                    'Val loss': f'{val_loss_avg:.4f}'
-                })
-
-            if (epoch + 1) % 100 == 0:
-                checkpoint = {
-                    'epoch': epoch + 1,
-                    'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'train_loss': train_loss_avg,
-                    'val_loss': val_loss_avg,
-                    'preprocessing_info': preprocessing_info
-                }
-                torch.save(checkpoint, os.path.join(save_dir, f'checkpoint_epoch_{epoch+1}.pth'))
-
-            pbar.update(1)
-
-    final_checkpoint = {
-        'model_state_dict': model.state_dict(),
-        'preprocessing_info': preprocessing_info,
-        'train_losses': train_losses,
-        'val_losses': val_losses
-    }
-    torch.save(final_checkpoint, os.path.join(save_dir, 'final_model.pth'))
-    
-    return train_losses, val_losses
-
 def load_and_preprocess_train_data(train_file, n_components=50, max_samples=100, random_state=42):
     print("=== 加载训练数据 ===")
     df = pd.read_csv(train_file, low_memory=False)
@@ -460,7 +325,6 @@ def train_model(model, train_dataset, preprocessing_info,
                 num_epochs=100, lr=0.001, device='cuda',
                 lambda_recon=1.0, lambda_time=0.5, lambda_sine=0.1,
                 period_hours=24.0, save_dir='./model_checkpoints'):
-    """训练模型（每个epoch处理全部样本）"""
     
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -470,7 +334,6 @@ def train_model(model, train_dataset, preprocessing_info,
     
     train_losses = []
     
-    # 收集训练集细胞类型信息（排除填充的细胞类型）
     if preprocessing_info['train_has_celltype']:
         all_celltypes = []
         for i in range(len(train_dataset)):
@@ -485,18 +348,16 @@ def train_model(model, train_dataset, preprocessing_info,
     
     os.makedirs(save_dir, exist_ok=True)
     
-    # 预先准备全部训练数据
     print("准备训练数据...")
     all_expressions = []
     all_times = []
     all_celltypes = []
-    valid_mask = []  # 标记哪些样本是有效的（非填充的）
+    valid_mask = []
     
     for i in range(len(train_dataset)):
         sample = train_dataset[i]
         all_expressions.append(sample['expression'])
         
-        # 判断是否为填充样本
         if 'celltype' in sample and sample['celltype'] == 'PADDING':
             is_valid = False
         else:
@@ -508,7 +369,6 @@ def train_model(model, train_dataset, preprocessing_info,
         if 'celltype' in sample:
             all_celltypes.append(sample['celltype'])
     
-    # 转换为张量
     expressions_tensor = torch.stack(all_expressions).to(device)
     valid_mask_tensor = torch.tensor(valid_mask, device=device)
     
@@ -532,10 +392,8 @@ def train_model(model, train_dataset, preprocessing_info,
             
             optimizer.zero_grad()
             
-            # 前向传播 - 处理全部样本
             phase_coords, reconstructed = model(expressions_tensor)
             
-            # 重建损失 - 只计算有效样本的损失
             if valid_mask_tensor.sum() > 0:
                 valid_expressions = expressions_tensor[valid_mask_tensor]
                 valid_reconstructed = reconstructed[valid_mask_tensor]
@@ -543,7 +401,6 @@ def train_model(model, train_dataset, preprocessing_info,
             else:
                 recon_loss = torch.tensor(0.0, device=device)
             
-            # 时间监督损失 - 只计算有效样本的损失
             time_loss = torch.tensor(0.0, device=device)
             if preprocessing_info['train_has_time'] and times_tensor is not None:
                 valid_phase_coords = phase_coords[valid_mask_tensor]
@@ -551,7 +408,6 @@ def train_model(model, train_dataset, preprocessing_info,
                 if len(valid_times) > 0:
                     time_loss = time_supervision_loss(valid_phase_coords, valid_times, 1.0, period_hours)
             
-            # 正弦先验损失 - 只计算有效样本的损失
             sine_loss = torch.tensor(0.0, device=device)
             if preprocessing_info['train_has_celltype'] and celltypes_array is not None:
                 valid_phase_coords = phase_coords[valid_mask_tensor]
@@ -562,16 +418,13 @@ def train_model(model, train_dataset, preprocessing_info,
                     final_celltypes = valid_celltypes[non_padding_mask]
                     sine_loss = sine_prior_loss(final_phase_coords, final_celltypes, celltype_to_idx, 1.0)
             
-            # 总损失
             total_loss = lambda_recon * recon_loss + lambda_time * time_loss + lambda_sine * sine_loss
             print("recon_loss:", recon_loss.item())
             print("time_loss:", time_loss.item())
             print("sine_loss:", sine_loss.item())
-            # 反向传播
             total_loss.backward()
             optimizer.step()
             
-            # 记录损失
             train_losses.append(total_loss.item())
             
             scheduler.step()
