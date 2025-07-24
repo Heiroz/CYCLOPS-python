@@ -65,27 +65,23 @@ class PhaseAutoEncoder(nn.Module):
         return self.decoder(phase_coords)
 
 def coords_to_phase(coords):
-    """将2D坐标转换为相位角度"""
     x, y = coords[:, 0], coords[:, 1]
     phase = torch.atan2(y, x)
     phase = torch.where(phase < 0, phase + 2*np.pi, phase)
     return phase
 
 def phase_to_coords(phase):
-    """将相位角度转换为2D坐标（单位圆上）"""
     x = torch.cos(phase)
     y = torch.sin(phase)
     return torch.stack([x, y], dim=1)
 
 def time_to_phase(time_hours, period_hours=24.0):
-    """将时间转换为相位"""
     return 2 * np.pi * time_hours / period_hours
 
 def train_model(model, train_loader, val_loader, preprocessing_info, 
                 num_epochs=100, lr=0.001, device='cuda',
                 lambda_recon=1.0, lambda_time=0.5, lambda_sine=0.1,
                 period_hours=24.0, save_dir='./model_checkpoints'):
-    """训练模型（使用验证集而不是测试集）"""
     
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -96,7 +92,6 @@ def train_model(model, train_loader, val_loader, preprocessing_info,
     train_losses = []
     val_losses = []
     
-    # 收集训练集细胞类型信息
     if preprocessing_info['train_has_celltype']:
         all_celltypes = []
         for batch in train_loader:
@@ -112,7 +107,6 @@ def train_model(model, train_loader, val_loader, preprocessing_info,
     print("开始训练...")
     with tqdm(total=num_epochs, desc="Training Progress") as pbar:
         for epoch in range(num_epochs):
-            # 训练阶段
             model.train()
             train_loss_epoch = 0.0
             train_recon_loss_epoch = 0.0
@@ -132,7 +126,6 @@ def train_model(model, train_loader, val_loader, preprocessing_info,
                 phase_coords, reconstructed = model(expressions)
                 recon_loss = recon_criterion(reconstructed, expressions)
                 
-                # 只在训练集有相应信息时计算对应损失
                 time_loss = torch.tensor(0.0, device=device)
                 if preprocessing_info['train_has_time'] and times is not None:
                     time_loss = time_supervision_loss(phase_coords, times, 1.0, period_hours)
@@ -150,7 +143,6 @@ def train_model(model, train_loader, val_loader, preprocessing_info,
                 train_time_loss_epoch += time_loss.item()
                 train_sine_loss_epoch += sine_loss.item()
 
-            # 验证阶段
             model.eval()
             val_loss_epoch = 0.0
             val_recon_loss_epoch = 0.0
@@ -169,7 +161,6 @@ def train_model(model, train_loader, val_loader, preprocessing_info,
                     phase_coords, reconstructed = model(expressions)
                     recon_loss = recon_criterion(reconstructed, expressions)
                     
-                    # 只在有相应信息时计算对应损失
                     time_loss = torch.tensor(0.0, device=device)
                     if preprocessing_info['train_has_time'] and times is not None:
                         time_loss = time_supervision_loss(phase_coords, times, 1.0, period_hours)
@@ -222,8 +213,7 @@ def train_model(model, train_loader, val_loader, preprocessing_info,
     
     return train_losses, val_losses
 
-def load_and_preprocess_train_data(train_file, n_components=50, random_state=42):
-    """加载和预处理训练数据（不分割验证集）"""
+def load_and_preprocess_train_data(train_file, n_components=50, max_samples=100, random_state=42):
     print("=== 加载训练数据 ===")
     df = pd.read_csv(train_file, low_memory=False)
     
@@ -239,6 +229,9 @@ def load_and_preprocess_train_data(train_file, n_components=50, random_state=42)
     sample_columns = [col for col in df.columns if col != 'Gene_Symbol']
     n_samples = len(sample_columns)
     
+    print(f"原始样本数量: {n_samples}")
+    print(f"最大样本数量限制: {max_samples}")
+    
     celltypes = None
     times = None
     
@@ -250,37 +243,65 @@ def load_and_preprocess_train_data(train_file, n_components=50, random_state=42)
         times = time_row.iloc[0][sample_columns].values.astype(float)
         print(f"训练集时间范围: {times.min():.2f} - {times.max():.2f} 小时")
     
-    # 提取基因表达数据
     gene_df = df[~df['Gene_Symbol'].isin(['celltype_D', 'time_C'])].copy()
     gene_names = gene_df['Gene_Symbol'].values
-    expression_data = gene_df[sample_columns].values.T  # (n_samples, n_genes)
+    expression_data = gene_df[sample_columns].values.T
     
     print(f"训练集原始基因数量: {len(gene_names)}")
-    print(f"训练集样本数量: {n_samples}")
     
-    # 标准化训练数据
     print("进行训练数据标准化...")
     scaler = StandardScaler()
     expression_scaled = scaler.fit_transform(expression_data)
     
-    # 使用SVD进行基因选择（基于训练集）
     print(f"基于训练集进行奇异值分解，选择前 {n_components} 个最重要的基因...")
     U, s, Vt = np.linalg.svd(expression_scaled.T, full_matrices=False)
     
-    # 计算基因重要性分数
     n_top_components = min(10, len(s))
     gene_importance = np.sum(np.abs(U[:, :n_top_components]) * s[:n_top_components], axis=1)
     
-    # 选择最重要的基因
     top_gene_indices = np.argsort(gene_importance)[-n_components:][::-1]
     selected_genes = gene_names[top_gene_indices]
     selected_expression = expression_scaled[:, top_gene_indices]
     
+    if n_samples > max_samples:
+        print(f"样本数量 ({n_samples}) 超过最大限制 ({max_samples})，进行截断...")
+        np.random.seed(random_state)
+        selected_indices = np.random.choice(n_samples, max_samples, replace=False)
+        selected_indices = np.sort(selected_indices)  # 保持原有顺序
+        
+        selected_expression = selected_expression[selected_indices]
+        if times is not None:
+            times = times[selected_indices]
+        if celltypes is not None:
+            celltypes = celltypes[selected_indices]
+        
+        actual_samples = max_samples
+        print(f"截断后样本数量: {actual_samples}")
+        
+    elif n_samples < max_samples:
+        print(f"样本数量 ({n_samples}) 少于最大限制 ({max_samples})，进行0填充...")
+        pad_size = max_samples - n_samples
+        
+        padding = np.zeros((pad_size, n_components))
+        selected_expression = np.vstack([selected_expression, padding])
+        
+        if times is not None:
+            times = np.concatenate([times, np.zeros(pad_size)])
+        if celltypes is not None:
+            celltypes = np.concatenate([celltypes, ['PADDING'] * pad_size])
+        
+        actual_samples = max_samples
+        print(f"填充后样本数量: {actual_samples}")
+        
+    else:
+        actual_samples = n_samples
+        print(f"样本数量正好等于最大限制: {actual_samples}")
+    
+    print(f"最终使用的样本数量: {actual_samples}")
     print(f"选择的基因数量: {len(selected_genes)}")
     print(f"选择的基因样例: {selected_genes[:10].tolist()}")
-    print(f"训练样本数: {len(selected_expression)}")
     
-    # 创建训练数据集（使用全部数据）
+    # 创建训练数据集（现在使用固定大小的数据）
     train_dataset = ExpressionDataset(selected_expression, times, celltypes)
     
     preprocessing_info = {
@@ -292,6 +313,9 @@ def load_and_preprocess_train_data(train_file, n_components=50, random_state=42)
         'train_has_time': has_time,
         'train_has_celltype': has_celltype,
         'n_components': n_components,
+        'max_samples': max_samples,
+        'actual_samples': actual_samples,
+        'original_samples': n_samples,
         'svd_info': {
             'U': U[:, :n_top_components],
             's': s[:n_top_components],
@@ -384,7 +408,7 @@ def sine_prior_loss(phase_coords, celltypes, celltype_to_idx, lambda_sine=1.0):
     if celltypes is None:
         return torch.tensor(0.0, device=phase_coords.device)
     
-    total_loss = 0.0
+    total_loss = torch.tensor(0.0, device=phase_coords.device)
     count = 0
     
     unique_celltypes = np.unique(celltypes)
@@ -395,18 +419,28 @@ def sine_prior_loss(phase_coords, celltypes, celltype_to_idx, lambda_sine=1.0):
             continue
             
         celltype_coords = phase_coords[mask]
-        
         phases = coords_to_phase(celltype_coords)
         
-        mean_phase = torch.atan2(torch.mean(torch.sin(phases)), torch.mean(torch.cos(phases)))
-        phase_diffs = torch.abs(phases - mean_phase)
-        phase_diffs = torch.min(phase_diffs, 2*np.pi - phase_diffs)
+        # 计算相位分布的统计特性（与正弦函数对比）
+        sin_values = torch.sin(phases)
+        cos_values = torch.cos(phases)
         
-        phase_variance = torch.mean(phase_diffs)
-        total_loss += phase_variance
+        # 目标1：均值接近0（正弦函数在完整周期内均值为0）
+        mean_sin = torch.mean(sin_values)
+        mean_cos = torch.mean(cos_values)
+        
+        # 目标2：自相关匹配（可选）
+        # 例如：E[sin(θ)cos(θ)] ≈ 0（正弦函数的正交性）
+        
+        loss = mean_sin**2 + mean_cos**2  # 越小越好（均值为0时loss=0）
+        total_loss += loss
         count += 1
     
-    return lambda_sine * (total_loss / count if count > 0 else 0.0)
+    if count > 0:
+        return lambda_sine * (total_loss / count)
+    else:
+        return torch.tensor(0.0, device=phase_coords.device)
+
 
 def time_supervision_loss(phase_coords, true_times, lambda_time=1.0, period_hours=24.0):
     if true_times is None:
@@ -422,97 +456,147 @@ def time_supervision_loss(phase_coords, true_times, lambda_time=1.0, period_hour
     
     return lambda_time * torch.mean(phase_diff)
 
-def train_model(model, train_loader, preprocessing_info, 
+def train_model(model, train_dataset, preprocessing_info, 
                 num_epochs=100, lr=0.001, device='cuda',
                 lambda_recon=1.0, lambda_time=0.5, lambda_sine=0.1,
                 period_hours=24.0, save_dir='./model_checkpoints'):
-    """训练模型（无验证集）"""
+    """训练模型（每个epoch处理全部样本）"""
     
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.5)  # 改为步长调度器
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.5)
     
     recon_criterion = nn.MSELoss()
     
     train_losses = []
     
-    # 收集训练集细胞类型信息
+    # 收集训练集细胞类型信息（排除填充的细胞类型）
     if preprocessing_info['train_has_celltype']:
         all_celltypes = []
-        for batch in train_loader:
-            if 'celltype' in batch:
-                all_celltypes.extend(batch['celltype'])
+        for i in range(len(train_dataset)):
+            celltype = train_dataset[i].get('celltype', None)
+            if celltype is not None and celltype != 'PADDING':
+                all_celltypes.append(celltype)
         unique_celltypes = list(set(all_celltypes))
         celltype_to_idx = {ct: idx for idx, ct in enumerate(unique_celltypes)}
+        print(f"训练集有效细胞类型: {unique_celltypes}")
     else:
         celltype_to_idx = {}
     
     os.makedirs(save_dir, exist_ok=True)
     
+    # 预先准备全部训练数据
+    print("准备训练数据...")
+    all_expressions = []
+    all_times = []
+    all_celltypes = []
+    valid_mask = []  # 标记哪些样本是有效的（非填充的）
+    
+    for i in range(len(train_dataset)):
+        sample = train_dataset[i]
+        all_expressions.append(sample['expression'])
+        
+        # 判断是否为填充样本
+        if 'celltype' in sample and sample['celltype'] == 'PADDING':
+            is_valid = False
+        else:
+            is_valid = True
+        valid_mask.append(is_valid)
+        
+        if 'time' in sample:
+            all_times.append(sample['time'])
+        if 'celltype' in sample:
+            all_celltypes.append(sample['celltype'])
+    
+    # 转换为张量
+    expressions_tensor = torch.stack(all_expressions).to(device)
+    valid_mask_tensor = torch.tensor(valid_mask, device=device)
+    
+    times_tensor = None
+    if all_times:
+        times_tensor = torch.stack(all_times).to(device)
+    
+    celltypes_array = None
+    if all_celltypes:
+        celltypes_array = np.array(all_celltypes)
+    
+    print(f"训练数据准备完成:")
+    print(f"  - 总样本数: {len(expressions_tensor)}")
+    print(f"  - 有效样本数: {valid_mask_tensor.sum().item()}")
+    print(f"  - 填充样本数: {(~valid_mask_tensor).sum().item()}")
+    
     print("开始训练...")
     with tqdm(total=num_epochs, desc="Training Progress") as pbar:
         for epoch in range(num_epochs):
-            # 训练阶段
             model.train()
-            train_loss_epoch = 0.0
-            train_recon_loss_epoch = 0.0
-            train_time_loss_epoch = 0.0
-            train_sine_loss_epoch = 0.0
-
-            for batch in train_loader:
-                expressions = batch['expression'].to(device)
-                times = batch.get('time', None)
-                celltypes = batch.get('celltype', None)
-
-                if times is not None:
-                    times = times.to(device)
-
-                optimizer.zero_grad()
-
-                phase_coords, reconstructed = model(expressions)
-                recon_loss = recon_criterion(reconstructed, expressions)
-                
-                # 只在训练集有相应信息时计算对应损失
-                time_loss = torch.tensor(0.0, device=device)
-                if preprocessing_info['train_has_time'] and times is not None:
-                    time_loss = time_supervision_loss(phase_coords, times, 1.0, period_hours)
-                
-                sine_loss = torch.tensor(0.0, device=device)
-                if preprocessing_info['train_has_celltype'] and celltypes is not None:
-                    sine_loss = sine_prior_loss(phase_coords, celltypes, celltype_to_idx, 1.0)
-
-                total_loss = lambda_recon * recon_loss + lambda_time * time_loss + lambda_sine * sine_loss
-                total_loss.backward()
-                optimizer.step()
-
-                train_loss_epoch += total_loss.item()
-                train_recon_loss_epoch += recon_loss.item()
-                train_time_loss_epoch += time_loss.item()
-                train_sine_loss_epoch += sine_loss.item()
-
-            train_loss_avg = train_loss_epoch / len(train_loader)
-            train_losses.append(train_loss_avg)
-
-            scheduler.step()  # 步长调度器
-
+            
+            optimizer.zero_grad()
+            
+            # 前向传播 - 处理全部样本
+            phase_coords, reconstructed = model(expressions_tensor)
+            
+            # 重建损失 - 只计算有效样本的损失
+            if valid_mask_tensor.sum() > 0:
+                valid_expressions = expressions_tensor[valid_mask_tensor]
+                valid_reconstructed = reconstructed[valid_mask_tensor]
+                recon_loss = recon_criterion(valid_reconstructed, valid_expressions)
+            else:
+                recon_loss = torch.tensor(0.0, device=device)
+            
+            # 时间监督损失 - 只计算有效样本的损失
+            time_loss = torch.tensor(0.0, device=device)
+            if preprocessing_info['train_has_time'] and times_tensor is not None:
+                valid_phase_coords = phase_coords[valid_mask_tensor]
+                valid_times = times_tensor[valid_mask_tensor]
+                if len(valid_times) > 0:
+                    time_loss = time_supervision_loss(valid_phase_coords, valid_times, 1.0, period_hours)
+            
+            # 正弦先验损失 - 只计算有效样本的损失
+            sine_loss = torch.tensor(0.0, device=device)
+            if preprocessing_info['train_has_celltype'] and celltypes_array is not None:
+                valid_phase_coords = phase_coords[valid_mask_tensor]
+                valid_celltypes = celltypes_array[valid_mask_tensor.cpu().numpy()]
+                non_padding_mask = valid_celltypes != 'PADDING'
+                if non_padding_mask.sum() > 0:
+                    final_phase_coords = valid_phase_coords[non_padding_mask]
+                    final_celltypes = valid_celltypes[non_padding_mask]
+                    sine_loss = sine_prior_loss(final_phase_coords, final_celltypes, celltype_to_idx, 1.0)
+            
+            # 总损失
+            total_loss = lambda_recon * recon_loss + lambda_time * time_loss + lambda_sine * sine_loss
+            print("recon_loss:", recon_loss.item())
+            print("time_loss:", time_loss.item())
+            print("sine_loss:", sine_loss.item())
+            # 反向传播
+            total_loss.backward()
+            optimizer.step()
+            
+            # 记录损失
+            train_losses.append(total_loss.item())
+            
+            scheduler.step()
+            
             if (epoch + 1) % 10 == 0:
                 pbar.set_postfix({
-                    'Train loss': f'{train_loss_avg:.4f}',
+                    'Train loss': f'{total_loss.item():.4f}',
+                    'Recon': f'{recon_loss.item():.4f}',
+                    'Time': f'{time_loss.item():.4f}',
+                    'Sine': f'{sine_loss.item():.4f}',
                     'LR': f'{scheduler.get_last_lr()[0]:.6f}'
                 })
-
+            
             if (epoch + 1) % 100 == 0:
                 checkpoint = {
                     'epoch': epoch + 1,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
-                    'train_loss': train_loss_avg,
+                    'train_loss': total_loss.item(),
                     'preprocessing_info': preprocessing_info
                 }
                 torch.save(checkpoint, os.path.join(save_dir, f'checkpoint_epoch_{epoch+1}.pth'))
-
+            
             pbar.update(1)
-
+    
     final_checkpoint = {
         'model_state_dict': model.state_dict(),
         'preprocessing_info': preprocessing_info,
@@ -704,9 +788,9 @@ def main():
     parser.add_argument("--train_file", required=True, help="训练数据文件路径")
     parser.add_argument("--test_file", default=None, help="测试数据文件路径（可选）")
     parser.add_argument("--n_components", type=int, default=50, help="选择的重要基因数量")
-    parser.add_argument("--batch_size", type=int, default=64, help="批大小")
+    parser.add_argument("--max_samples", type=int, default=100, help="最大样本数量（超过则截断，不足则填充）")
     parser.add_argument("--num_epochs", type=int, default=100, help="训练轮数")
-    parser.add_argument("--lr", type=float, default=0.0001, help="学习率")
+    parser.add_argument("--lr", type=float, default=0.00001, help="学习率")
     parser.add_argument("--lambda_recon", type=float, default=1.0, help="重建损失权重")
     parser.add_argument("--lambda_time", type=float, default=0.5, help="时间监督损失权重")
     parser.add_argument("--lambda_sine", type=float, default=0.1, help="正弦先验损失权重")
@@ -730,16 +814,16 @@ def main():
     if args.test_file:
         print(f"测试数据文件: {args.test_file}")
     print(f"选择重要基因数: {args.n_components}")
+    print(f"最大样本数量: {args.max_samples}")
     print(f"设备: {args.device}")
     
     train_dataset, preprocessing_info = load_and_preprocess_train_data(
-        args.train_file, args.n_components, args.random_seed
+        args.train_file, args.n_components, args.max_samples, args.random_seed
     )
     
     preprocessing_info['period_hours'] = args.period_hours
     
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    
+    # 不再使用DataLoader，直接传入dataset
     model = PhaseAutoEncoder(
         input_dim=args.n_components,
         dropout=args.dropout
@@ -749,7 +833,7 @@ def main():
     
     train_losses = train_model(
         model=model,
-        train_loader=train_loader,
+        train_dataset=train_dataset,  # 直接传入dataset而不是loader
         preprocessing_info=preprocessing_info,
         num_epochs=args.num_epochs,
         lr=args.lr,
@@ -781,7 +865,8 @@ def main():
             args.test_file, preprocessing_info
         )
         
-        test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
+        # 测试阶段仍使用DataLoader，因为测试样本可能很多
+        test_loader = DataLoader(test_dataset, batch_size=1000, shuffle=False)
         
         prediction_results = predict_and_save_phases(
             model=model,
