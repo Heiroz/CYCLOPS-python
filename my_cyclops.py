@@ -413,15 +413,15 @@ def train_model(model, train_dataset, preprocessing_info,
                     'LR': f'{scheduler.get_last_lr()[0]:.6f}'
                 })
             
-            if (epoch + 1) % 1000 == 0:
-                checkpoint = {
-                    'epoch': epoch + 1,
-                    'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'train_loss': total_loss.item(),
-                    'preprocessing_info': preprocessing_info
-                }
-                torch.save(checkpoint, os.path.join(save_dir, f'checkpoint_epoch_{epoch+1}.pth'))
+            # if (epoch + 1) % 1000 == 0:
+            #     checkpoint = {
+            #         'epoch': epoch + 1,
+            #         'model_state_dict': model.state_dict(),
+            #         'optimizer_state_dict': optimizer.state_dict(),
+            #         'train_loss': total_loss.item(),
+            #         'preprocessing_info': preprocessing_info
+            #     }
+            #     torch.save(checkpoint, os.path.join(save_dir, f'checkpoint_epoch_{epoch+1}.pth'))
             
             pbar.update(1)
     
@@ -611,7 +611,7 @@ def create_prediction_plots(results_df, save_dir):
     
     print(f"预测分析图表保存到: {os.path.join(save_dir, 'prediction_analysis.png')}")
 
-def plot_gene_expression_by_phase(model, test_loader, preprocessing_info, device='cuda', save_dir='./results', n_genes_to_plot=10):
+def plot_gene_expression_by_phase(model, test_loader, preprocessing_info, device='cuda', save_dir='./results', n_genes_to_plot=10, custom_genes=None):
     """绘制基因表达量随预测相位变化的图表"""
     print("\n=== 绘制基因表达相位图 ===")
     model.eval()
@@ -638,7 +638,7 @@ def plot_gene_expression_by_phase(model, test_loader, preprocessing_info, device
                 all_celltypes.extend(celltypes)
     
     # 合并数据
-    expressions_data = np.vstack(all_expressions)
+    expressions_data = np.vstack(all_expressions)  # SVD处理后的数据
     phase_hours_data = np.concatenate(all_phase_hours)
     
     if all_celltypes:
@@ -649,13 +649,32 @@ def plot_gene_expression_by_phase(model, test_loader, preprocessing_info, device
         celltypes_data = None
         unique_celltypes = ['All_Samples']
     
-    # 获取重要基因信息
-    selected_genes = preprocessing_info['selected_genes']
-    n_genes_to_plot = min(n_genes_to_plot, len(selected_genes))
-    top_genes = selected_genes[:n_genes_to_plot]
+    # 获取要绘制的基因信息和对应的表达数据
+    if custom_genes is not None:
+        print(f"使用用户指定的基因列表: {custom_genes}")
+        
+        # 需要重新加载原始测试数据来获取指定基因的表达量
+        gene_expressions, gene_names_to_plot = get_custom_gene_expressions(
+            preprocessing_info, custom_genes, phase_hours_data, celltypes_data
+        )
+        
+        if gene_expressions is None:
+            print("无法获取自定义基因表达数据，使用SVD选择的基因")
+            selected_genes = preprocessing_info['selected_genes']
+            n_genes_to_plot = min(n_genes_to_plot, len(selected_genes))
+            gene_names_to_plot = selected_genes[:n_genes_to_plot]
+            gene_expressions = expressions_data[:, :n_genes_to_plot]
+        
+    else:
+        # 使用默认的SVD选择的基因
+        selected_genes = preprocessing_info['selected_genes']
+        n_genes_to_plot = min(n_genes_to_plot, len(selected_genes))
+        gene_names_to_plot = selected_genes[:n_genes_to_plot]
+        gene_expressions = expressions_data[:, :n_genes_to_plot]
+        print(f"使用默认的前 {n_genes_to_plot} 个SVD选择的基因")
     
-    print(f"绘制前 {n_genes_to_plot} 个最重要基因的表达图")
-    print(f"基因列表: {top_genes}")
+    print(f"将要绘制的基因: {gene_names_to_plot}")
+    print(f"基因表达数据维度: {gene_expressions.shape}")
     
     # 创建相位分箱
     n_bins = 24  # 每小时一个分箱
@@ -672,33 +691,109 @@ def plot_gene_expression_by_phase(model, test_loader, preprocessing_info, device
                 continue
                 
             celltype_mask = celltypes_data == celltype
-            celltype_expressions = expressions_data[celltype_mask]
+            celltype_expressions = gene_expressions[celltype_mask]
             celltype_phases = phase_hours_data[celltype_mask]
             
             if len(celltype_expressions) < 10:  # 样本太少跳过
                 continue
             
             plot_celltype_gene_expression(
-                celltype_expressions, celltype_phases, top_genes, 
+                celltype_expressions, celltype_phases, gene_names_to_plot,
                 phase_centers, phase_bins, celltype, save_dir
             )
     else:
         # 所有样本一起绘制
         plot_celltype_gene_expression(
-            expressions_data, phase_hours_data, top_genes, 
+            gene_expressions, phase_hours_data, gene_names_to_plot,
             phase_centers, phase_bins, 'All_Samples', save_dir
         )
     
     # 创建综合对比图
     if celltypes_data is not None and len(unique_celltypes) > 1:
-        plot_celltype_comparison(
-            expressions_data, phase_hours_data, celltypes_data, top_genes,
-            phase_centers, phase_bins, unique_celltypes, save_dir
-        )
+        # 过滤掉PADDING类型
+        valid_celltypes = [ct for ct in unique_celltypes if ct != 'PADDING']
+        if len(valid_celltypes) > 1:
+            plot_celltype_comparison(
+                gene_expressions, phase_hours_data, celltypes_data, gene_names_to_plot,
+                phase_centers, phase_bins, valid_celltypes, save_dir
+            )
+
+def get_custom_gene_expressions(preprocessing_info, custom_genes, phase_hours_data, celltypes_data):
+    """获取自定义基因的表达数据"""
+    try:
+        # 从preprocessing_info中获取测试文件信息
+        if 'test_sample_columns' not in preprocessing_info:
+            print("警告: 无法获取测试文件信息")
+            return None, None
+            
+        # 这里需要重新读取原始测试数据
+        # 注意：这个函数假设我们可以访问原始测试文件
+        # 在实际使用中，可能需要传入test_file路径
+        print("注意: 需要重新读取原始测试数据来获取自定义基因表达量")
+        print("当前实现将返回None，请在main函数中传入原始数据")
+        return None, None
+        
+    except Exception as e:
+        print(f"获取自定义基因表达数据时出错: {e}")
+        return None, None
+
+def get_original_gene_expressions(test_file, custom_genes, preprocessing_info, phase_hours_data, celltypes_data):
+    """从原始测试文件中获取自定义基因的表达数据"""
+    try:
+        print(f"从原始文件重新读取自定义基因: {custom_genes}")
+        
+        # 重新读取原始测试数据
+        df = pd.read_csv(test_file, low_memory=False)
+        
+        # 提取基因表达数据
+        gene_df = df[~df['Gene_Symbol'].isin(['celltype_D', 'time_C'])].copy()
+        test_gene_names = gene_df['Gene_Symbol'].values
+        
+        sample_columns = [col for col in df.columns if col != 'Gene_Symbol']
+        test_expression_data = gene_df[sample_columns].values.T  # (n_samples, n_genes)
+        
+        # 使用训练时的scaler进行标准化
+        scaler = preprocessing_info['scaler']
+        test_expression_scaled = scaler.transform(test_expression_data)
+        
+        # 查找自定义基因
+        found_genes = []
+        gene_expressions_list = []
+        
+        for gene in custom_genes:
+            if gene in test_gene_names:
+                gene_idx = np.where(test_gene_names == gene)[0][0]
+                gene_expression = test_expression_scaled[:, gene_idx]
+                gene_expressions_list.append(gene_expression)
+                found_genes.append(gene)
+                print(f"  ✓ 找到基因: {gene}")
+            else:
+                print(f"  ✗ 基因 {gene} 不在测试数据中")
+        
+        if len(found_genes) == 0:
+            print("错误: 没有找到任何指定的基因")
+            return None, None
+        
+        # 转换为numpy数组
+        gene_expressions = np.column_stack(gene_expressions_list)
+        
+        print(f"成功获取 {len(found_genes)} 个基因的表达数据")
+        print(f"表达数据维度: {gene_expressions.shape}")
+        
+        return gene_expressions, np.array(found_genes)
+        
+    except Exception as e:
+        print(f"从原始文件读取基因表达数据时出错: {e}")
+        return None, None
 
 def plot_celltype_gene_expression(expressions, phase_hours, gene_names, phase_centers, phase_bins, celltype, save_dir):
     """为单个细胞类型绘制基因表达图"""
     n_genes = len(gene_names)
+    
+    print(f"为细胞类型 {celltype} 绘制基因表达图")
+    print(f"样本数量: {len(expressions)}")
+    print(f"基因数量: {n_genes}")
+    print(f"表达数据维度: {expressions.shape}")
     
     # 计算每个相位分箱的平均表达量和标准误差
     binned_expressions = np.zeros((len(phase_centers), n_genes))
@@ -709,21 +804,34 @@ def plot_celltype_gene_expression(expressions, phase_hours, gene_names, phase_ce
         mask = (phase_hours >= start) & (phase_hours < end)
         if mask.sum() > 0:
             binned_expressions[i] = np.mean(expressions[mask], axis=0)
-            binned_std[i] = np.std(expressions[mask], axis=0) / np.sqrt(mask.sum())  # 标准误差
+            binned_std[i] = np.std(expressions[mask], axis=0) / np.sqrt(mask.sum())
             binned_counts[i] = mask.sum()
     
-    # 创建图表
-    fig, axes = plt.subplots(2, 5, figsize=(20, 8))
-    axes = axes.flatten()
+    # 创建图表 - 动态调整布局
+    n_cols = min(5, n_genes)
+    n_rows = (n_genes + n_cols - 1) // n_cols  # 向上取整
     
-    for gene_idx in range(min(n_genes, 10)):
-        ax = axes[gene_idx]
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4*n_cols, 4*n_rows))
+    if n_genes == 1:
+        axes = [axes]
+    elif n_rows == 1:
+        axes = axes.flatten() if n_genes > 1 else [axes]
+    else:
+        axes = axes.flatten()
+    
+    for i, gene_name in enumerate(gene_names):
+        ax = axes[i]
         
         # 绘制表达量曲线
         valid_mask = binned_counts > 0
         x_data = phase_centers[valid_mask]
-        y_data = binned_expressions[valid_mask, gene_idx]
-        y_err = binned_std[valid_mask, gene_idx]
+        y_data = binned_expressions[valid_mask, i]
+        y_err = binned_std[valid_mask, i]
+        
+        if len(x_data) == 0:
+            ax.text(0.5, 0.5, 'No Data', transform=ax.transAxes, ha='center', va='center')
+            ax.set_title(f'{gene_name}', fontsize=10)
+            continue
         
         # 主要曲线
         ax.plot(x_data, y_data, 'o-', linewidth=2, markersize=4, alpha=0.8, label='Expression')
@@ -732,7 +840,6 @@ def plot_celltype_gene_expression(expressions, phase_hours, gene_names, phase_ce
         # 尝试拟合正弦曲线
         if len(x_data) > 5:
             try:
-                # 正弦拟合
                 def sine_func(x, amplitude, phase_shift, offset):
                     return amplitude * np.sin(2 * np.pi * x / 24 + phase_shift) + offset
                 
@@ -752,23 +859,21 @@ def plot_celltype_gene_expression(expressions, phase_hours, gene_names, phase_ce
                        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
                 
             except Exception as e:
-                print(f"拟合失败 {gene_names[gene_idx]}: {e}")
+                print(f"拟合失败 {gene_name}: {e}")
         
-        ax.set_title(f'{gene_names[gene_idx]}', fontsize=10)
+        ax.set_title(f'{gene_name}', fontsize=10)
         ax.set_xlabel('Predicted Phase (Hours)')
         ax.set_ylabel('Expression Level')
         ax.grid(True, alpha=0.3)
         ax.set_xlim(0, 24)
-        
-        # 设置x轴刻度
         ax.set_xticks([0, 6, 12, 18, 24])
         
-        if gene_idx == 0:
+        if i == 0:
             ax.legend(fontsize=8)
     
     # 隐藏多余的子图
-    for gene_idx in range(n_genes, 10):
-        axes[gene_idx].set_visible(False)
+    for i in range(n_genes, len(axes)):
+        axes[i].set_visible(False)
     
     plt.suptitle(f'Gene Expression vs Predicted Phase - {celltype}', fontsize=14)
     plt.tight_layout()
@@ -780,25 +885,27 @@ def plot_celltype_gene_expression(expressions, phase_hours, gene_names, phase_ce
     
     print(f"基因表达相位图已保存: {filepath}")
 
-def plot_celltype_comparison(expressions, phase_hours, celltypes, gene_names, phase_centers, phase_bins, unique_celltypes, save_dir):
+def plot_celltype_comparison(expressions, phase_hours, celltypes, gene_names, phase_centers, phase_bins, valid_celltypes, save_dir):
     """绘制不同细胞类型的基因表达对比图"""
     print("绘制细胞类型对比图...")
+    print(f"有效细胞类型: {valid_celltypes}")
+    print(f"选择的基因: {gene_names}")
     
-    # 选择前4个最重要的基因进行对比
-    top_4_genes = gene_names[:4]
+    n_genes_to_compare = min(4, len(gene_names))
+    top_genes = gene_names[:n_genes_to_compare]
     
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
     axes = axes.flatten()
     
-    colors = plt.cm.tab10(np.linspace(0, 1, len(unique_celltypes)))
+    colors = plt.cm.tab10(np.linspace(0, 1, len(valid_celltypes)))
     
-    for gene_idx, gene_name in enumerate(top_4_genes):
-        ax = axes[gene_idx]
+    for i, gene_name in enumerate(top_genes):
+        if i >= 4:
+            break
+            
+        ax = axes[i]
         
-        for celltype_idx, celltype in enumerate(unique_celltypes):
-            if celltype == 'PADDING':
-                continue
-                
+        for celltype_idx, celltype in enumerate(valid_celltypes):
             celltype_mask = celltypes == celltype
             celltype_expressions = expressions[celltype_mask]
             celltype_phases = phase_hours[celltype_mask]
@@ -810,13 +917,12 @@ def plot_celltype_comparison(expressions, phase_hours, celltypes, gene_names, ph
             binned_expr = np.zeros(len(phase_centers))
             binned_counts = np.zeros(len(phase_centers))
             
-            for i, (start, end) in enumerate(zip(phase_bins[:-1], phase_bins[1:])):
+            for bin_i, (start, end) in enumerate(zip(phase_bins[:-1], phase_bins[1:])):
                 mask = (celltype_phases >= start) & (celltype_phases < end)
                 if mask.sum() > 0:
-                    binned_expr[i] = np.mean(celltype_expressions[mask, gene_idx])
-                    binned_counts[i] = mask.sum()
+                    binned_expr[bin_i] = np.mean(celltype_expressions[mask, i])
+                    binned_counts[bin_i] = mask.sum()
             
-            # 绘制曲线
             valid_mask = binned_counts > 0
             if valid_mask.sum() > 3:
                 x_data = phase_centers[valid_mask]
@@ -833,6 +939,9 @@ def plot_celltype_comparison(expressions, phase_hours, celltypes, gene_names, ph
         ax.set_xticks([0, 6, 12, 18, 24])
         ax.legend(fontsize=8)
     
+    for i in range(n_genes_to_compare, 4):
+        axes[i].set_visible(False)
+    
     plt.suptitle('Gene Expression Comparison Across Cell Types', fontsize=16)
     plt.tight_layout()
     
@@ -842,6 +951,77 @@ def plot_celltype_comparison(expressions, phase_hours, celltypes, gene_names, ph
     plt.close()
     
     print(f"细胞类型对比图已保存: {filepath}")
+
+def plot_gene_expression_with_custom_data(model, test_loader, preprocessing_info, custom_gene_expressions, custom_gene_names, device='cuda', save_dir='./results'):
+    """使用自定义基因数据绘制基因表达相位图"""
+    print("\n=== 使用自定义基因数据绘制基因表达相位图 ===")
+    model.eval()
+    
+    all_phase_hours = []
+    all_celltypes = []
+    
+    with torch.no_grad():
+        for batch in test_loader:
+            expressions = batch['expression'].to(device)
+            celltypes = batch.get('celltype', None)
+            
+            phase_coords, _ = model(expressions)
+            phases = coords_to_phase(phase_coords)
+            phase_hours = phases.cpu().numpy() * preprocessing_info.get('period_hours', 24.0) / (2 * np.pi)
+            
+            all_phase_hours.append(phase_hours)
+            
+            if celltypes is not None:
+                all_celltypes.extend(celltypes)
+    
+    phase_hours_data = np.concatenate(all_phase_hours)
+    
+    if all_celltypes:
+        celltypes_data = np.array(all_celltypes)
+        unique_celltypes = np.unique(celltypes_data)
+        print(f"发现细胞类型: {unique_celltypes}")
+    else:
+        celltypes_data = None
+        unique_celltypes = ['All_Samples']
+    
+    print(f"自定义基因: {custom_gene_names}")
+    print(f"基因表达数据维度: {custom_gene_expressions.shape}")
+    
+    n_bins = 24
+    phase_bins = np.linspace(0, 24, n_bins + 1)
+    phase_centers = (phase_bins[:-1] + phase_bins[1:]) / 2
+    
+    os.makedirs(save_dir, exist_ok=True)
+    
+    if celltypes_data is not None:
+        for celltype in unique_celltypes:
+            if celltype == 'PADDING':
+                continue
+                
+            celltype_mask = celltypes_data == celltype
+            celltype_expressions = custom_gene_expressions[celltype_mask]
+            celltype_phases = phase_hours_data[celltype_mask]
+            
+            if len(celltype_expressions) < 10:
+                continue
+            
+            plot_celltype_gene_expression(
+                celltype_expressions, celltype_phases, custom_gene_names,
+                phase_centers, phase_bins, celltype, save_dir
+            )
+    else:
+        plot_celltype_gene_expression(
+            custom_gene_expressions, phase_hours_data, custom_gene_names,
+            phase_centers, phase_bins, 'All_Samples', save_dir
+        )
+    
+    if celltypes_data is not None and len(unique_celltypes) > 1:
+        valid_celltypes = [ct for ct in unique_celltypes if ct != 'PADDING']
+        if len(valid_celltypes) > 1:
+            plot_celltype_comparison(
+                custom_gene_expressions, phase_hours_data, celltypes_data, custom_gene_names,
+                phase_centers, phase_bins, valid_celltypes, save_dir
+            )
 
 def main():
     parser = argparse.ArgumentParser(description="训练相位自编码器模型")
@@ -859,7 +1039,8 @@ def main():
     parser.add_argument("--device", default='cuda', help="设备 (cuda/cpu)")
     parser.add_argument("--save_dir", default='./phase_autoencoder_results', help="保存目录")
     parser.add_argument("--random_seed", type=int, default=42, help="随机种子")
-    parser.add_argument("--n_genes_plot", type=int, default=10, help="绘制的基因数量")
+    parser.add_argument("--n_genes_plot", type=int, default=10, help="绘制的基因数量（当未指定custom_genes时使用）")
+    parser.add_argument("--custom_genes", nargs='*', default=None, help="指定要绘制的基因列表，例如: --custom_genes GENE1 GENE2 GENE3")
     
     args = parser.parse_args()
     
@@ -877,6 +1058,11 @@ def main():
     print(f"选择重要基因数: {args.n_components}")
     print(f"最大样本数量: {args.max_samples}")
     print(f"设备: {args.device}")
+    
+    if args.custom_genes:
+        print(f"用户指定基因: {args.custom_genes}")
+    else:
+        print(f"将绘制前 {args.n_genes_plot} 个重要基因")
     
     train_dataset, preprocessing_info = load_and_preprocess_train_data(
         args.train_file, args.n_components, args.max_samples, args.random_seed
@@ -927,7 +1113,7 @@ def main():
         
         test_loader = DataLoader(test_dataset, batch_size=1000, shuffle=False)
         
-        prediction_results = predict_and_save_phases(
+        _ = predict_and_save_phases(
             model=model,
             test_loader=test_loader,
             preprocessing_info=test_preprocessing_info,
@@ -935,16 +1121,45 @@ def main():
             save_dir=args.save_dir
         )
         
-        # 新增：绘制基因表达相位图
         print(f"\n=== 绘制基因表达相位图 ===")
-        plot_gene_expression_by_phase(
-            model=model,
-            test_loader=test_loader,
-            preprocessing_info=test_preprocessing_info,
-            device=args.device,
-            save_dir=args.save_dir,
-            n_genes_to_plot=args.n_genes_plot
-        )
+        
+        if args.custom_genes:
+            custom_gene_expressions, custom_gene_names = get_original_gene_expressions(
+                args.test_file, args.custom_genes, test_preprocessing_info,
+                None, None
+            )
+            
+            if custom_gene_expressions is not None:
+                plot_gene_expression_with_custom_data(
+                    model=model,
+                    test_loader=test_loader,
+                    preprocessing_info=test_preprocessing_info,
+                    custom_gene_expressions=custom_gene_expressions,
+                    custom_gene_names=custom_gene_names,
+                    device=args.device,
+                    save_dir=args.save_dir
+                )
+            else:
+                print("无法获取自定义基因数据，使用SVD选择的基因")
+                plot_gene_expression_by_phase(
+                    model=model,
+                    test_loader=test_loader,
+                    preprocessing_info=test_preprocessing_info,
+                    device=args.device,
+                    save_dir=args.save_dir,
+                    n_genes_to_plot=args.n_genes_plot,
+                    custom_genes=None
+                )
+        else:
+            plot_gene_expression_by_phase(
+                model=model,
+                test_loader=test_loader,
+                preprocessing_info=test_preprocessing_info,
+                device=args.device,
+                save_dir=args.save_dir,
+                n_genes_to_plot=args.n_genes_plot,
+                custom_genes=None
+            )
         
         print(f"\n=== 测试完成 ===")
         print(f"主要输出文件:")
