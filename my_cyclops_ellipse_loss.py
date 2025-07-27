@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 import argparse
@@ -12,7 +11,6 @@ import os
 from tqdm import tqdm
 
 class ExpressionDataset(Dataset):
-    """基因表达数据集"""
     def __init__(self, expressions, times=None, celltypes=None):
         self.expressions = torch.FloatTensor(expressions)
         self.times = torch.FloatTensor(times) if times is not None else None
@@ -30,11 +28,27 @@ class ExpressionDataset(Dataset):
         return sample
 
 class PhaseAutoEncoder(nn.Module):
-    def __init__(self, input_dim, dropout=0.2):
+    def __init__(self, input_dim, dropout=0.2, hidden_dim=128):
         super(PhaseAutoEncoder, self).__init__()
         self.input_dim = input_dim
 
+        # self.encoder = nn.Sequential(
+        #     nn.Linear(input_dim, hidden_dim),
+        #     nn.ReLU(),
+        #     nn.Dropout(dropout),
+        #     nn.Linear(hidden_dim, 32),
+        #     nn.ReLU(),
+        #     nn.Linear(32, 2)
+        # )
         self.encoder = nn.Linear(input_dim, 2)
+        # self.decoder = nn.Sequential(
+        #     nn.Linear(2, 32),
+        #     nn.ReLU(),
+        #     nn.Linear(32, hidden_dim),
+        #     nn.ReLU(),
+        #     nn.Dropout(dropout),
+        #     nn.Linear(hidden_dim, input_dim)
+        # )
         self.decoder = nn.Linear(2, input_dim)
     
     def forward(self, x):
@@ -150,7 +164,6 @@ def load_and_preprocess_train_data(train_file, n_components=50, max_samples=100,
     print(f"选择的基因数量: {len(selected_genes)}")
     print(f"选择的基因样例: {selected_genes[:10].tolist()}")
     
-    # 创建训练数据集（现在使用固定大小的数据）
     train_dataset = ExpressionDataset(selected_expression, times, celltypes)
     
     preprocessing_info = {
@@ -175,7 +188,6 @@ def load_and_preprocess_train_data(train_file, n_components=50, max_samples=100,
     return train_dataset, preprocessing_info
 
 def load_and_preprocess_test_data(test_file, preprocessing_info):
-    """加载和预处理测试数据（使用训练时的预处理参数）"""
     print("\n=== 加载测试数据 ===")
     df = pd.read_csv(test_file, low_memory=False)
     
@@ -202,15 +214,13 @@ def load_and_preprocess_test_data(test_file, preprocessing_info):
         times = time_row.iloc[0][sample_columns].values.astype(float)
         print(f"测试集时间范围: {times.min():.2f} - {times.max():.2f} 小时")
     
-    # 提取基因表达数据
     gene_df = df[~df['Gene_Symbol'].isin(['celltype_D', 'time_C'])].copy()
     test_gene_names = gene_df['Gene_Symbol'].values
-    test_expression_data = gene_df[sample_columns].values.T  # (n_samples, n_genes)
+    test_expression_data = gene_df[sample_columns].values.T
     
     print(f"测试集原始基因数量: {len(test_gene_names)}")
     print(f"测试集样本数量: {n_samples}")
     
-    # 使用训练时的scaler进行标准化
     scaler = preprocessing_info['scaler']
     selected_genes = preprocessing_info['selected_genes']
     n_components = preprocessing_info['n_components']
@@ -249,45 +259,11 @@ def load_and_preprocess_test_data(test_file, preprocessing_info):
     
     return test_dataset, test_preprocessing_info
 
-def sine_prior_loss(phase_coords, celltypes, celltype_to_idx, lambda_sine=1.0):
-    if celltypes is None:
-        return torch.tensor(0.0, device=phase_coords.device)
-    
-    total_loss = torch.tensor(0.0, device=phase_coords.device)
-    count = 0
-    
-    unique_celltypes = np.unique(celltypes)
-    
-    for celltype in unique_celltypes:
-        mask = np.array([ct == celltype for ct in celltypes])
-        if mask.sum() < 2:
-            continue
-            
-        celltype_coords = phase_coords[mask]
-        phases = coords_to_phase(celltype_coords)
-        
-        sin_values = torch.sin(phases)
-        cos_values = torch.cos(phases)
-        
-        mean_sin = torch.mean(sin_values)
-        mean_cos = torch.mean(cos_values)
-        
-        loss = mean_sin**2 + mean_cos**2
-        total_loss += loss
-        count += 1
-    
-    if count > 0:
-        return lambda_sine * (total_loss / count)
-    else:
-        return torch.tensor(0.0, device=phase_coords.device)
-
-
 def time_supervision_loss(phase_coords, true_times, lambda_time=1.0, period_hours=24.0):
     if true_times is None:
         return torch.tensor(0.0, device=phase_coords.device)
     
     true_phases = time_to_phase(true_times, period_hours)
-    true_coords = phase_to_coords(true_phases)
     
     pred_phases = coords_to_phase(phase_coords)
     
@@ -296,30 +272,19 @@ def time_supervision_loss(phase_coords, true_times, lambda_time=1.0, period_hour
     
     return lambda_time * torch.mean(phase_diff)
 
+
 def train_model(model, train_dataset, preprocessing_info, 
                 num_epochs=100, lr=0.001, device='cuda',
-                lambda_recon=1.0, lambda_time=0.5, lambda_sine=0.1,
+                lambda_recon=1.0, lambda_time=0.5, lambda_ellipse=0.1,
                 period_hours=24.0, save_dir='./model_checkpoints'):
-    
     model = model.to(device)
+
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.5)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.5)
     
     recon_criterion = nn.MSELoss()
     
     train_losses = []
-    
-    if preprocessing_info['train_has_celltype']:
-        all_celltypes = []
-        for i in range(len(train_dataset)):
-            celltype = train_dataset[i].get('celltype', None)
-            if celltype is not None and celltype != 'PADDING':
-                all_celltypes.append(celltype)
-        unique_celltypes = list(set(all_celltypes))
-        celltype_to_idx = {ct: idx for idx, ct in enumerate(unique_celltypes)}
-        print(f"训练集有效细胞类型: {unique_celltypes}")
-    else:
-        celltype_to_idx = {}
     
     os.makedirs(save_dir, exist_ok=True)
     
@@ -358,13 +323,12 @@ def train_model(model, train_dataset, preprocessing_info,
     print(f"训练数据准备完成:")
     print(f"  - 总样本数: {len(expressions_tensor)}")
     print(f"  - 有效样本数: {valid_mask_tensor.sum().item()}")
-    print(f"  - 填充样本数: {(~valid_mask_tensor).sum().item()}")
     
-    print("开始训练...")
-    with tqdm(total=num_epochs, desc="Training Progress") as pbar:
+    print(f"\n=== 开始端到端联合训练 ({num_epochs} epochs) ===")
+    
+    with tqdm(total=num_epochs, desc="Joint Training Progress") as pbar:
         for epoch in range(num_epochs):
-            model.train()
-            
+            model.train()            
             optimizer.zero_grad()
             
             phase_coords, reconstructed = model(expressions_tensor)
@@ -383,7 +347,7 @@ def train_model(model, train_dataset, preprocessing_info,
                 if len(valid_times) > 0:
                     time_loss = time_supervision_loss(valid_phase_coords, valid_times, 1.0, period_hours)
             
-            sine_loss = torch.tensor(0.0, device=device)
+            ellipse_loss = torch.tensor(0.0, device=device)
             if preprocessing_info['train_has_celltype'] and celltypes_array is not None:
                 valid_phase_coords = phase_coords[valid_mask_tensor]
                 valid_celltypes = celltypes_array[valid_mask_tensor.cpu().numpy()]
@@ -391,12 +355,26 @@ def train_model(model, train_dataset, preprocessing_info,
                 if non_padding_mask.sum() > 0:
                     final_phase_coords = valid_phase_coords[non_padding_mask]
                     final_celltypes = valid_celltypes[non_padding_mask]
-                    sine_loss = sine_prior_loss(final_phase_coords, final_celltypes, celltype_to_idx, 1.0)
-            
-            total_loss = lambda_recon * recon_loss + lambda_time * time_loss + lambda_sine * sine_loss
-            print("recon_loss:", recon_loss.item())
-            print("time_loss:", time_loss.item())
-            print("sine_loss:", sine_loss.item())
+                    unique_celltypes = np.unique(final_celltypes)
+                    ellipse_losses = []
+                    for ct in unique_celltypes:
+                        ct_mask = final_celltypes == ct
+                        coords = final_phase_coords[ct_mask]
+                        if coords.shape[0] < 5:
+                            continue
+                        mean = coords.mean(dim=0)
+                        cov = torch.cov(coords.T)
+                        diff = coords - mean
+                        try:
+                            cov_inv = torch.linalg.inv(cov)
+                            ellipse_eq = torch.sum(diff @ cov_inv * diff, dim=1)
+                            ellipse_losses.append(torch.mean((ellipse_eq - 1) ** 2))
+                        except Exception:
+                            continue
+                    if ellipse_losses:
+                        ellipse_loss = torch.mean(torch.stack(ellipse_losses))
+
+            total_loss = lambda_recon * recon_loss + lambda_time * time_loss + lambda_ellipse * ellipse_loss
             total_loss.backward()
             optimizer.step()
             
@@ -409,19 +387,9 @@ def train_model(model, train_dataset, preprocessing_info,
                     'Train loss': f'{total_loss.item():.4f}',
                     'Recon': f'{recon_loss.item():.4f}',
                     'Time': f'{time_loss.item():.4f}',
-                    'Sine': f'{sine_loss.item():.4f}',
+                    'Ellipse': f'{ellipse_loss.item():.4f}',
                     'LR': f'{scheduler.get_last_lr()[0]:.6f}'
                 })
-            
-            # if (epoch + 1) % 1000 == 0:
-            #     checkpoint = {
-            #         'epoch': epoch + 1,
-            #         'model_state_dict': model.state_dict(),
-            #         'optimizer_state_dict': optimizer.state_dict(),
-            #         'train_loss': total_loss.item(),
-            #         'preprocessing_info': preprocessing_info
-            #     }
-            #     torch.save(checkpoint, os.path.join(save_dir, f'checkpoint_epoch_{epoch+1}.pth'))
             
             pbar.update(1)
     
@@ -611,121 +579,6 @@ def create_prediction_plots(results_df, save_dir):
     
     print(f"预测分析图表保存到: {os.path.join(save_dir, 'prediction_analysis.png')}")
 
-def plot_gene_expression_by_phase(
-    model, 
-    test_loader, 
-    preprocessing_info, 
-    device='cuda', 
-    save_dir='./results', 
-    n_genes_to_plot=10, 
-    custom_genes=None
-):
-    print("\n=== 绘制基因表达相位图 ===")
-    model.eval()
-    
-    all_expressions = []
-    all_phase_hours = []
-    all_celltypes = []
-    
-    with torch.no_grad():
-        for batch in test_loader:
-            expressions = batch['expression'].to(device)
-            celltypes = batch.get('celltype', None)
-            
-            phase_coords, _ = model(expressions)
-            phases = coords_to_phase(phase_coords)
-            phase_hours = phases.cpu().numpy() * preprocessing_info.get('period_hours', 24.0) / (2 * np.pi)
-            
-            all_expressions.append(expressions.cpu().numpy())
-            all_phase_hours.append(phase_hours)
-            
-            if celltypes is not None:
-                all_celltypes.extend(celltypes)
-    
-    expressions_data = np.vstack(all_expressions)
-    phase_hours_data = np.concatenate(all_phase_hours)
-    
-    if all_celltypes:
-        celltypes_data = np.array(all_celltypes)
-        unique_celltypes = np.unique(celltypes_data)
-        print(f"发现细胞类型: {unique_celltypes}")
-    else:
-        celltypes_data = None
-        unique_celltypes = ['All_Samples']
-    
-    if custom_genes is not None:
-        print(f"使用用户指定的基因列表: {custom_genes}")
-        
-        gene_expressions, gene_names_to_plot = get_custom_gene_expressions(
-            preprocessing_info, custom_genes, phase_hours_data, celltypes_data
-        )
-        
-        if gene_expressions is None:
-            print("无法获取自定义基因表达数据，使用SVD选择的基因")
-            selected_genes = preprocessing_info['selected_genes']
-            n_genes_to_plot = min(n_genes_to_plot, len(selected_genes))
-            gene_names_to_plot = selected_genes[:n_genes_to_plot]
-            gene_expressions = expressions_data[:, :n_genes_to_plot]
-        
-    else:
-        selected_genes = preprocessing_info['selected_genes']
-        n_genes_to_plot = min(n_genes_to_plot, len(selected_genes))
-        gene_names_to_plot = selected_genes[:n_genes_to_plot]
-        gene_expressions = expressions_data[:, :n_genes_to_plot]
-        print(f"使用默认的前 {n_genes_to_plot} 个SVD选择的基因")
-    
-    print(f"将要绘制的基因: {gene_names_to_plot}")
-    print(f"基因表达数据维度: {gene_expressions.shape}")
-    
-    n_bins = 24
-    phase_bins = np.linspace(0, 24, n_bins + 1)
-    phase_centers = (phase_bins[:-1] + phase_bins[1:]) / 2
-    
-    os.makedirs(save_dir, exist_ok=True)
-    
-    if celltypes_data is not None:
-        for celltype in unique_celltypes:
-            if celltype == 'PADDING':
-                continue
-                
-            celltype_mask = celltypes_data == celltype
-            celltype_expressions = gene_expressions[celltype_mask]
-            celltype_phases = phase_hours_data[celltype_mask]
-            
-            if len(celltype_expressions) < 10:
-                continue
-            
-            plot_celltype_gene_expression(
-                celltype_expressions, celltype_phases, gene_names_to_plot,
-                phase_centers, phase_bins, celltype, save_dir
-            )
-    else:
-        plot_celltype_gene_expression(
-            gene_expressions, phase_hours_data, gene_names_to_plot,
-            phase_centers, phase_bins, 'All_Samples', save_dir
-        )
-    
-    if celltypes_data is not None and len(unique_celltypes) > 1:
-        valid_celltypes = [ct for ct in unique_celltypes if ct != 'PADDING']
-        if len(valid_celltypes) > 1:
-            plot_celltype_comparison(
-                gene_expressions, phase_hours_data, celltypes_data, gene_names_to_plot,
-                phase_centers, phase_bins, valid_celltypes, save_dir
-            )
-
-def get_custom_gene_expressions(preprocessing_info, custom_genes, phase_hours_data, celltypes_data):
-    try:
-        if 'test_sample_columns' not in preprocessing_info:
-            print("警告: 无法获取测试文件信息")
-            return None, None
-            
-        print("注意: 需要重新读取原始测试数据来获取自定义基因表达量")
-        print("当前实现将返回None，请在main函数中传入原始数据")
-        return None, None
-        
-    except Exception as e:
-        print(f"获取自定义基因表达数据时出错: {e}")
-        return None, None
 
 def get_original_gene_expressions(test_file, custom_genes, preprocessing_info, phase_hours_data, celltypes_data):
     try:
@@ -770,30 +623,18 @@ def get_original_gene_expressions(test_file, custom_genes, preprocessing_info, p
         print(f"从原始文件读取基因表达数据时出错: {e}")
         return None, None
 
-def plot_celltype_gene_expression(expressions, phase_hours, gene_names, phase_centers, phase_bins, celltype, save_dir):
-    """为单个细胞类型绘制基因表达图"""
+def plot_celltype_gene_expression_raw(expressions, phase_hours, gene_names, celltype, save_dir):
     n_genes = len(gene_names)
     
-    print(f"为细胞类型 {celltype} 绘制基因表达图")
+    print(f"为细胞类型 {celltype} 绘制基因表达图（原始数据）")
     print(f"样本数量: {len(expressions)}")
     print(f"基因数量: {n_genes}")
     print(f"表达数据维度: {expressions.shape}")
     
-    binned_expressions = np.zeros((len(phase_centers), n_genes))
-    binned_std = np.zeros((len(phase_centers), n_genes))
-    binned_counts = np.zeros(len(phase_centers))
-    
-    for i, (start, end) in enumerate(zip(phase_bins[:-1], phase_bins[1:])):
-        mask = (phase_hours >= start) & (phase_hours < end)
-        if mask.sum() > 0:
-            binned_expressions[i] = np.mean(expressions[mask], axis=0)
-            binned_std[i] = np.std(expressions[mask], axis=0) / np.sqrt(mask.sum())
-            binned_counts[i] = mask.sum()
-    
     n_cols = min(5, n_genes)
     n_rows = (n_genes + n_cols - 1) // n_cols
     
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4*n_cols, 4*n_rows))
+    _, axes = plt.subplots(n_rows, n_cols, figsize=(4*n_cols, 4*n_rows))
     if n_genes == 1:
         axes = [axes]
     elif n_rows == 1:
@@ -804,34 +645,37 @@ def plot_celltype_gene_expression(expressions, phase_hours, gene_names, phase_ce
     for i, gene_name in enumerate(gene_names):
         ax = axes[i]
         
-        valid_mask = binned_counts > 0
-        x_data = phase_centers[valid_mask]
-        y_data = binned_expressions[valid_mask, i]
-        y_err = binned_std[valid_mask, i]
+        gene_expression = expressions[:, i]
         
-        if len(x_data) == 0:
+        if len(phase_hours) == 0:
             ax.text(0.5, 0.5, 'No Data', transform=ax.transAxes, ha='center', va='center')
             ax.set_title(f'{gene_name}', fontsize=10)
             continue
         
-        ax.plot(x_data, y_data, 'o-', linewidth=2, markersize=4, alpha=0.8, label='Expression')
-        ax.fill_between(x_data, y_data - y_err, y_data + y_err, alpha=0.3)
+        ax.scatter(phase_hours, gene_expression, alpha=0.6, s=20, color='blue', label='Raw Data')
         
-        if len(x_data) > 5:
+        if len(phase_hours) > 5:
             try:
                 def sine_func(x, amplitude, phase_shift, offset):
                     return amplitude * np.sin(2 * np.pi * x / 24 + phase_shift) + offset
                 
                 from scipy.optimize import curve_fit
-                popt, _ = curve_fit(sine_func, x_data, y_data, maxfev=2000)
+                popt, _ = curve_fit(sine_func, phase_hours, gene_expression, maxfev=2000)
                 
                 x_fit = np.linspace(0, 24, 100)
                 y_fit = sine_func(x_fit, *popt)
-                ax.plot(x_fit, y_fit, '--', color='red', alpha=0.7, label='Sine Fit')
+                ax.plot(x_fit, y_fit, '--', color='green', alpha=0.7, linewidth=2, label='Sine Fit')
                 
-                amplitude, phase_shift, offset = popt
+                amplitude, phase_shift, _ = popt
                 peak_time = (-phase_shift * 24 / (2 * np.pi)) % 24
-                ax.text(0.02, 0.98, f'Peak: {peak_time:.1f}h\nAmp: {amplitude:.3f}', 
+                
+                y_pred = sine_func(phase_hours, *popt)
+                ss_res = np.sum((gene_expression - y_pred) ** 2)
+                ss_tot = np.sum((gene_expression - np.mean(gene_expression)) ** 2)
+                r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+                
+                ax.text(0.02, 0.98, 
+                       f'Peak: {peak_time:.1f}h\nAmp: {amplitude:.3f}\nR²: {r_squared:.3f}', 
                        transform=ax.transAxes, verticalalignment='top', fontsize=8,
                        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
                 
@@ -851,7 +695,7 @@ def plot_celltype_gene_expression(expressions, phase_hours, gene_names, phase_ce
     for i in range(n_genes, len(axes)):
         axes[i].set_visible(False)
     
-    plt.suptitle(f'Gene Expression vs Predicted Phase - {celltype}', fontsize=14)
+    plt.suptitle(f'Gene Expression vs Predicted Phase - {celltype} (Raw Data)', fontsize=14)
     plt.tight_layout()
     
     filename = f'gene_expression_phase_{celltype}.png'
@@ -859,64 +703,90 @@ def plot_celltype_gene_expression(expressions, phase_hours, gene_names, phase_ce
     plt.savefig(filepath, dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"基因表达相位图已保存: {filepath}")
+    print(f"基因表达相位图（原始数据）已保存: {filepath}")
 
-def plot_celltype_comparison(expressions, phase_hours, celltypes, gene_names, phase_centers, phase_bins, valid_celltypes, save_dir):
-    print("绘制细胞类型对比图...")
+def plot_celltype_comparison_raw(
+    expressions, 
+    phase_hours, 
+    celltypes, 
+    gene_names, 
+    valid_celltypes, 
+    save_dir,
+    n_genes_to_compare=4
+):
+    print("绘制细胞类型对比图（原始数据）...")
     print(f"有效细胞类型: {valid_celltypes}")
-    print(f"选择的基因: {gene_names}")
+    print(f"选择的基因: {gene_names[:n_genes_to_compare]}")
     
-    n_genes_to_compare = min(4, len(gene_names))
+    n_genes_to_compare = min(n_genes_to_compare, len(gene_names))
     top_genes = gene_names[:n_genes_to_compare]
     
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    axes = axes.flatten()
+    n_cols = min(2, n_genes_to_compare)
+    n_rows = (n_genes_to_compare + n_cols - 1) // n_cols
+    
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(8*n_cols, 6*n_rows))
+    if n_genes_to_compare == 1:
+        axes = [axes]
+    elif n_rows == 1:
+        axes = axes.flatten() if n_genes_to_compare > 1 else [axes]
+    else:
+        axes = axes.flatten()
     
     colors = plt.cm.tab10(np.linspace(0, 1, len(valid_celltypes)))
     
     for i, gene_name in enumerate(top_genes):
-        if i >= 4:
+        if i >= len(axes):
             break
             
         ax = axes[i]
         
         for celltype_idx, celltype in enumerate(valid_celltypes):
             celltype_mask = celltypes == celltype
-            celltype_expressions = expressions[celltype_mask]
+            celltype_expressions = expressions[celltype_mask, i]
             celltype_phases = phase_hours[celltype_mask]
             
-            if len(celltype_expressions) < 5:
+            if len(celltype_expressions) < 3:
                 continue
             
-            binned_expr = np.zeros(len(phase_centers))
-            binned_counts = np.zeros(len(phase_centers))
+            ax.scatter(celltype_phases, celltype_expressions, 
+                      color=colors[celltype_idx], alpha=0.6, s=15, 
+                      label=f'{celltype} (n={len(celltype_expressions)})')
             
-            for bin_i, (start, end) in enumerate(zip(phase_bins[:-1], phase_bins[1:])):
-                mask = (celltype_phases >= start) & (celltype_phases < end)
-                if mask.sum() > 0:
-                    binned_expr[bin_i] = np.mean(celltype_expressions[mask, i])
-                    binned_counts[bin_i] = mask.sum()
-            
-            valid_mask = binned_counts > 0
-            if valid_mask.sum() > 3:
-                x_data = phase_centers[valid_mask]
-                y_data = binned_expr[valid_mask]
-                
-                ax.plot(x_data, y_data, 'o-', color=colors[celltype_idx], 
-                       label=celltype, linewidth=2, markersize=4, alpha=0.8)
+            if len(celltype_expressions) > 5:
+                try:
+                    sorted_indices = np.argsort(celltype_phases)
+                    sorted_phases = celltype_phases[sorted_indices]
+                    sorted_expressions = celltype_expressions[sorted_indices]
+                    
+                    window_size = max(3, len(sorted_phases) // 8)
+                    if len(sorted_phases) >= window_size:
+                        from scipy.ndimage import uniform_filter1d
+                        smooth_expression = uniform_filter1d(sorted_expressions.astype(float), size=window_size)
+                        ax.plot(sorted_phases, smooth_expression, 
+                               color=colors[celltype_idx], linewidth=2, alpha=0.8)
+                        
+                except Exception as e:
+                    print(f"平滑处理失败 {gene_name} - {celltype}: {e}")
         
-        ax.set_title(f'{gene_name}', fontsize=12)
-        ax.set_xlabel('Predicted Phase (Hours)')
-        ax.set_ylabel('Expression Level')
+        ax.set_title(f'{gene_name}', fontsize=14, fontweight='bold')
+        ax.set_xlabel('Predicted Phase (Hours)', fontsize=12)
+        ax.set_ylabel('Expression Level', fontsize=12)
         ax.grid(True, alpha=0.3)
         ax.set_xlim(0, 24)
         ax.set_xticks([0, 6, 12, 18, 24])
-        ax.legend(fontsize=8)
+        
+        handles, labels = ax.get_legend_handles_labels()
+        if len(handles) <= 8:
+            ax.legend(fontsize=10, loc='best')
+        else:
+            ax.legend(handles[:8], labels[:8], fontsize=10, loc='best', 
+                     title=f"Showing first 8/{len(handles)} cell types")
     
-    for i in range(n_genes_to_compare, 4):
+    for i in range(n_genes_to_compare, len(axes)):
         axes[i].set_visible(False)
     
-    plt.suptitle('Gene Expression Comparison Across Cell Types', fontsize=16)
+    plt.suptitle('Gene Expression Comparison Across Cell Types (Raw Data)', 
+                 fontsize=16, fontweight='bold')
     plt.tight_layout()
     
     filename = 'gene_expression_celltype_comparison.png'
@@ -924,7 +794,7 @@ def plot_celltype_comparison(expressions, phase_hours, celltypes, gene_names, ph
     plt.savefig(filepath, dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"细胞类型对比图已保存: {filepath}")
+    print(f"细胞类型对比图（原始数据）已保存: {filepath}")
 
 def plot_gene_expression_with_custom_data(
     model, 
@@ -935,7 +805,7 @@ def plot_gene_expression_with_custom_data(
     device='cuda', 
     save_dir='./results'
 ):
-    print("\n=== 使用自定义基因数据绘制基因表达相位图 ===")
+    print("\n=== 使用自定义基因数据绘制基因表达相位图（原始数据）===")
     model.eval()
     
     all_phase_hours = []
@@ -968,10 +838,6 @@ def plot_gene_expression_with_custom_data(
     print(f"自定义基因: {custom_gene_names}")
     print(f"基因表达数据维度: {custom_gene_expressions.shape}")
     
-    n_bins = 24
-    phase_bins = np.linspace(0, 24, n_bins + 1)
-    phase_centers = (phase_bins[:-1] + phase_bins[1:]) / 2
-    
     os.makedirs(save_dir, exist_ok=True)
     
     if celltypes_data is not None:
@@ -983,35 +849,36 @@ def plot_gene_expression_with_custom_data(
             celltype_expressions = custom_gene_expressions[celltype_mask]
             celltype_phases = phase_hours_data[celltype_mask]
             
-            if len(celltype_expressions) < 10:
+            if len(celltype_expressions) < 5:
                 continue
             
-            plot_celltype_gene_expression(
+            plot_celltype_gene_expression_raw(
                 celltype_expressions, celltype_phases, custom_gene_names,
-                phase_centers, phase_bins, celltype, save_dir
+                celltype, save_dir
             )
     else:
-        plot_celltype_gene_expression(
+        plot_celltype_gene_expression_raw(
             custom_gene_expressions, phase_hours_data, custom_gene_names,
-            phase_centers, phase_bins, 'All_Samples', save_dir
+            'All_Samples', save_dir
         )
     
     if celltypes_data is not None and len(unique_celltypes) > 1:
         valid_celltypes = [ct for ct in unique_celltypes if ct != 'PADDING']
         if len(valid_celltypes) > 1:
-            plot_celltype_comparison(
+            plot_celltype_comparison_raw(
                 custom_gene_expressions, phase_hours_data, celltypes_data, custom_gene_names,
-                phase_centers, phase_bins, valid_celltypes, save_dir
+                valid_celltypes, save_dir
             )
+    
+    print("自定义基因表达相位图绘制完成！")
 
 def main():
     parser = argparse.ArgumentParser(description="训练相位自编码器模型")
     parser.add_argument("--train_file", required=True, help="训练数据文件路径")
     parser.add_argument("--test_file", default=None, help="测试数据文件路径（可选）")
     parser.add_argument("--n_components", type=int, default=50, help="选择的重要基因数量")
-    parser.add_argument("--max_samples", type=int, default=100, help="最大样本数量（超过则截断，不足则填充）")
     parser.add_argument("--num_epochs", type=int, default=100, help="训练轮数")
-    parser.add_argument("--lr", type=float, default=0.0001, help="学习率")
+    parser.add_argument("--lr", type=float, default=0.001, help="学习率")
     parser.add_argument("--lambda_recon", type=float, default=1.0, help="重建损失权重")
     parser.add_argument("--lambda_time", type=float, default=0.5, help="时间监督损失权重")
     parser.add_argument("--lambda_sine", type=float, default=0.5, help="正弦先验损失权重")
@@ -1021,8 +888,9 @@ def main():
     parser.add_argument("--save_dir", default='./phase_autoencoder_results', help="保存目录")
     parser.add_argument("--random_seed", type=int, default=42, help="随机种子")
     parser.add_argument("--n_genes_plot", type=int, default=10, help="绘制的基因数量（当未指定custom_genes时使用）")
-    parser.add_argument("--custom_genes", nargs='*', default=None, help="指定要绘制的基因列表，例如: --custom_genes GENE1 GENE2 GENE3")
-    
+    parser.add_argument("--custom_genes", nargs='*', default=None, required=True, help="指定要绘制的基因列表，例如: --custom_genes GENE1 GENE2 GENE3")
+    parser.add_argument("--sine_predictor_hidden", type=int, default=64, help="正弦参数预测器的隐藏层维度")
+
     args = parser.parse_args()
     
     torch.manual_seed(args.random_seed)
@@ -1037,7 +905,12 @@ def main():
     if args.test_file:
         print(f"测试数据文件: {args.test_file}")
     print(f"选择重要基因数: {args.n_components}")
-    print(f"最大样本数量: {args.max_samples}")
+
+    df_tmp = pd.read_csv(args.train_file, low_memory=False)
+    sample_columns_tmp = [col for col in df_tmp.columns if col != 'Gene_Symbol']
+    max_samples = len(sample_columns_tmp)
+    print(f"自动设置最大样本数量为训练数据样本数: {max_samples}")
+
     print(f"设备: {args.device}")
     
     if args.custom_genes:
@@ -1046,7 +919,7 @@ def main():
         print(f"将绘制前 {args.n_genes_plot} 个重要基因")
     
     train_dataset, preprocessing_info = load_and_preprocess_train_data(
-        args.train_file, args.n_components, args.max_samples, args.random_seed
+        args.train_file, args.n_components, max_samples, args.random_seed
     )
     
     preprocessing_info['period_hours'] = args.period_hours
@@ -1057,7 +930,8 @@ def main():
     )
     
     print(f"模型参数数量: {sum(p.numel() for p in model.parameters())}")
-    
+
+    print("使用神经网络正弦损失进行端到端训练...")
     train_losses = train_model(
         model=model,
         train_dataset=train_dataset,
@@ -1067,7 +941,7 @@ def main():
         device=args.device,
         lambda_recon=args.lambda_recon,
         lambda_time=args.lambda_time,
-        lambda_sine=args.lambda_sine,
+        lambda_ellipse=args.lambda_sine,
         period_hours=args.period_hours,
         save_dir=args.save_dir
     )
@@ -1104,43 +978,19 @@ def main():
         
         print(f"\n=== 绘制基因表达相位图 ===")
         
-        if args.custom_genes:
-            custom_gene_expressions, custom_gene_names = get_original_gene_expressions(
-                args.test_file, args.custom_genes, test_preprocessing_info,
-                None, None
-            )
-            
-            if custom_gene_expressions is not None:
-                plot_gene_expression_with_custom_data(
-                    model=model,
-                    test_loader=test_loader,
-                    preprocessing_info=test_preprocessing_info,
-                    custom_gene_expressions=custom_gene_expressions,
-                    custom_gene_names=custom_gene_names,
-                    device=args.device,
-                    save_dir=args.save_dir
-                )
-            else:
-                print("无法获取自定义基因数据，使用SVD选择的基因")
-                plot_gene_expression_by_phase(
-                    model=model,
-                    test_loader=test_loader,
-                    preprocessing_info=test_preprocessing_info,
-                    device=args.device,
-                    save_dir=args.save_dir,
-                    n_genes_to_plot=args.n_genes_plot,
-                    custom_genes=None
-                )
-        else:
-            plot_gene_expression_by_phase(
-                model=model,
-                test_loader=test_loader,
-                preprocessing_info=test_preprocessing_info,
-                device=args.device,
-                save_dir=args.save_dir,
-                n_genes_to_plot=args.n_genes_plot,
-                custom_genes=None
-            )
+        custom_gene_expressions, custom_gene_names = get_original_gene_expressions(
+            args.test_file, args.custom_genes, test_preprocessing_info,
+            None, None
+        )
+        plot_gene_expression_with_custom_data(
+            model=model,
+            test_loader=test_loader,
+            preprocessing_info=test_preprocessing_info,
+            custom_gene_expressions=custom_gene_expressions,
+            custom_gene_names=custom_gene_names,
+            device=args.device,
+            save_dir=args.save_dir
+        )
         
         print(f"\n=== 测试完成 ===")
         print(f"主要输出文件:")
