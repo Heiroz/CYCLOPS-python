@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import argparse
 import os
 from tqdm import tqdm
+from sklearn.decomposition import SparsePCA, PCA
 
 class ExpressionDataset(Dataset):
     def __init__(self, expressions, times=None, celltypes=None):
@@ -28,36 +29,40 @@ class ExpressionDataset(Dataset):
         return sample
 
 class PhaseAutoEncoder(nn.Module):
-    def __init__(self, input_dim, dropout=0.2, hidden_dim=128):
+    def __init__(self, input_dim, n_celltypes=0, celltype_embedding_dim=4, dropout=0.1):
         super(PhaseAutoEncoder, self).__init__()
         self.input_dim = input_dim
-
-        # self.encoder = nn.Sequential(
-        #     nn.Linear(input_dim, hidden_dim),
-        #     nn.ReLU(),
-        #     nn.Dropout(dropout),
-        #     nn.Linear(hidden_dim, 32),
-        #     nn.ReLU(),
-        #     nn.Linear(32, 2)
-        # )
-        self.encoder = nn.Linear(input_dim, 2)
-        # self.decoder = nn.Sequential(
-        #     nn.Linear(2, 32),
-        #     nn.ReLU(),
-        #     nn.Linear(32, hidden_dim),
-        #     nn.ReLU(),
-        #     nn.Dropout(dropout),
-        #     nn.Linear(hidden_dim, input_dim)
-        # )
+        self.n_celltypes = n_celltypes
+        self.use_celltype = n_celltypes > 0
+        self.celltype_embedding_dim = celltype_embedding_dim
+        
+        if self.use_celltype:
+            self.celltype_embedding = nn.Embedding(n_celltypes, celltype_embedding_dim)
+            encoder_input_dim = input_dim + celltype_embedding_dim
+        else:
+            encoder_input_dim = input_dim
+        
+        self.encoder = nn.Linear(encoder_input_dim, 2)
         self.decoder = nn.Linear(2, input_dim)
     
-    def forward(self, x):
-        phase_coords = self.encoder(x)
+    def forward(self, x, celltype_indices=None):
+        if self.use_celltype and celltype_indices is not None:
+            celltype_emb = self.celltype_embedding(celltype_indices)
+            combined_input = torch.cat([x, celltype_emb], dim=1)
+        else:
+            combined_input = x
+        
+        phase_coords = self.encoder(combined_input)
         reconstructed = self.decoder(phase_coords)
         return phase_coords, reconstructed
     
-    def encode(self, x):
-        return self.encoder(x)
+    def encode(self, x, celltype_indices=None):
+        if self.use_celltype and celltype_indices is not None:
+            celltype_emb = self.celltype_embedding(celltype_indices)
+            combined_input = torch.cat([x, celltype_emb], dim=1)
+        else:
+            combined_input = x
+        return self.encoder(combined_input)
     
     def decode(self, phase_coords):
         return self.decoder(phase_coords)
@@ -116,15 +121,11 @@ def load_and_preprocess_train_data(train_file, n_components=50, max_samples=100,
     scaler = StandardScaler()
     expression_scaled = scaler.fit_transform(expression_data)
     
-    print(f"基于训练集进行奇异值分解，选择前 {n_components} 个最重要的基因...")
-    U, s, Vt = np.linalg.svd(expression_scaled.T, full_matrices=False)
-    
-    n_top_components = min(n_components, len(s))
-    gene_importance = np.sum(np.abs(U[:, :n_top_components]) * s[:n_top_components], axis=1)
-    
-    top_gene_indices = np.argsort(gene_importance)[-n_components:][::-1]
-    selected_genes = gene_names[top_gene_indices]
-    selected_expression = expression_scaled[:, top_gene_indices]
+    print("进行PCA变换...")
+    sparse_pca = PCA(n_components=n_components)
+    spc_components = sparse_pca.fit_transform(expression_scaled)
+    explained_variance = sparse_pca.explained_variance_ratio_
+    selected_expression = spc_components
     
     if n_samples > max_samples:
         print(f"样本数量 ({n_samples}) 超过最大限制 ({max_samples})，进行截断...")
@@ -159,30 +160,30 @@ def load_and_preprocess_train_data(train_file, n_components=50, max_samples=100,
     else:
         actual_samples = n_samples
         print(f"样本数量正好等于最大限制: {actual_samples}")
-    
-    print(f"最终使用的样本数量: {actual_samples}")
-    print(f"选择的基因数量: {len(selected_genes)}")
-    print(f"选择的基因样例: {selected_genes[:10].tolist()}")
+        
+    celltype_to_idx = {}
+    if has_celltype:
+        unique_celltypes = np.unique(celltypes)
+        celltype_to_idx = {ct: idx for idx, ct in enumerate(unique_celltypes)}
+        print(f"细胞类型映射: {celltype_to_idx}")
     
     train_dataset = ExpressionDataset(selected_expression, times, celltypes)
     
     preprocessing_info = {
         'scaler': scaler,
-        'selected_gene_indices': top_gene_indices,
-        'selected_genes': selected_genes,
-        'gene_importance_scores': gene_importance[top_gene_indices],
-        'all_gene_names': gene_names,
+        'pca_model': sparse_pca,
+        'spc_components': spc_components,
+        'explained_variance': explained_variance,
         'train_has_time': has_time,
         'train_has_celltype': has_celltype,
+        'celltype_to_idx': celltype_to_idx,
+        'n_celltypes': len(celltype_to_idx) if celltype_to_idx else 0,
         'n_components': n_components,
         'max_samples': max_samples,
         'actual_samples': actual_samples,
         'original_samples': n_samples,
-        'svd_info': {
-            'U': U[:, :n_top_components],
-            's': s[:n_top_components],
-            'Vt': Vt[:n_top_components, :]
-        }
+        'all_gene_names': gene_names,
+        'period_hours': 24.0
     }
     
     return train_dataset, preprocessing_info
@@ -222,39 +223,30 @@ def load_and_preprocess_test_data(test_file, preprocessing_info):
     print(f"测试集样本数量: {n_samples}")
     
     scaler = preprocessing_info['scaler']
-    selected_genes = preprocessing_info['selected_genes']
+    pca_model = preprocessing_info['pca_model']
     n_components = preprocessing_info['n_components']
     
     print("使用训练集的标准化参数处理测试数据...")
     test_expression_scaled = scaler.transform(test_expression_data)
-
-    test_selected_expression = np.zeros((n_samples, n_components))
-    missing_genes = []
-    found_genes = []
-
-    for train_idx, gene in enumerate(selected_genes):
-        if gene in test_gene_names:
-            test_gene_idx = np.where(test_gene_names == gene)[0][0]
-            test_selected_expression[:, train_idx] = test_expression_scaled[:, test_gene_idx]
-            found_genes.append(gene)
-        else:
-            missing_genes.append(gene)
-            test_selected_expression[:, train_idx] = 0
     
-    print(f"测试集中找到的基因数量: {len(found_genes)}")
-    if missing_genes:
-        print(f"测试集中缺失的基因数量: {len(missing_genes)}")
-        print(f"缺失基因样例: {missing_genes[:5]}")
+    print("使用训练集的SPC模型变换测试数据...")
+    test_spc_components = pca_model.transform(test_expression_scaled)
     
-    test_dataset = ExpressionDataset(test_selected_expression, times, celltypes)
+    print(f"SPC变换后的测试数据维度: {test_spc_components.shape}")
+    print(f"期望的SPC组件数量: {n_components}")
+    
+    if test_spc_components.shape[1] != n_components:
+        print(f"警告: SPC组件维度不匹配，期望 {n_components}，实际 {test_spc_components.shape[1]}")
+    
+    test_dataset = ExpressionDataset(test_spc_components, times, celltypes)
     
     test_preprocessing_info = preprocessing_info.copy()
     test_preprocessing_info.update({
         'test_has_time': has_time,
         'test_has_celltype': has_celltype,
-        'test_sample_columns': sample_columns,
-        'found_genes': found_genes,
-        'missing_genes': missing_genes
+        'test_sample_columns': sample_columns,  # 保存样本名称
+        'test_gene_names': test_gene_names,
+        'test_spc_components': test_spc_components
     })
     
     return test_dataset, test_preprocessing_info
@@ -277,6 +269,15 @@ def train_model(model, train_dataset, preprocessing_info,
                 num_epochs=100, lr=0.001, device='cuda',
                 lambda_recon=1.0, lambda_time=0.5, lambda_ellipse=0.1,
                 period_hours=24.0, save_dir='./model_checkpoints'):
+    
+    if 'train_has_time' not in preprocessing_info:
+        sample = train_dataset[0]
+        preprocessing_info['train_has_time'] = 'time' in sample
+    
+    if 'train_has_celltype' not in preprocessing_info:
+        sample = train_dataset[0]
+        preprocessing_info['train_has_celltype'] = 'celltype' in sample
+    
     model = model.to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -320,9 +321,23 @@ def train_model(model, train_dataset, preprocessing_info,
     if all_celltypes:
         celltypes_array = np.array(all_celltypes)
     
+    # 准备细胞类型索引
+    celltype_indices_tensor = None
+    if preprocessing_info['train_has_celltype'] and celltypes_array is not None:
+        celltype_to_idx = preprocessing_info['celltype_to_idx']
+        celltype_indices = []
+        for ct in celltypes_array:
+            if ct == 'PADDING':
+                celltype_indices.append(0)  # 用0表示PADDING
+            else:
+                celltype_indices.append(celltype_to_idx.get(ct, 0))
+        celltype_indices_tensor = torch.tensor(celltype_indices, device=device)
+    
     print(f"训练数据准备完成:")
     print(f"  - 总样本数: {len(expressions_tensor)}")
     print(f"  - 有效样本数: {valid_mask_tensor.sum().item()}")
+    if celltype_indices_tensor is not None:
+        print(f"  - 细胞类型数量: {preprocessing_info['n_celltypes']}")
     
     print(f"\n=== 开始端到端联合训练 ({num_epochs} epochs) ===")
     
@@ -331,7 +346,8 @@ def train_model(model, train_dataset, preprocessing_info,
             model.train()            
             optimizer.zero_grad()
             
-            phase_coords, reconstructed = model(expressions_tensor)
+            # 传入细胞类型信息
+            phase_coords, reconstructed = model(expressions_tensor, celltype_indices_tensor)
             
             if valid_mask_tensor.sum() > 0:
                 valid_expressions = expressions_tensor[valid_mask_tensor]
@@ -348,31 +364,31 @@ def train_model(model, train_dataset, preprocessing_info,
                     time_loss = time_supervision_loss(valid_phase_coords, valid_times, 1.0, period_hours)
             
             ellipse_loss = torch.tensor(0.0, device=device)
-            if preprocessing_info['train_has_celltype'] and celltypes_array is not None:
-                valid_phase_coords = phase_coords[valid_mask_tensor]
-                valid_celltypes = celltypes_array[valid_mask_tensor.cpu().numpy()]
-                non_padding_mask = valid_celltypes != 'PADDING'
-                if non_padding_mask.sum() > 0:
-                    final_phase_coords = valid_phase_coords[non_padding_mask]
-                    final_celltypes = valid_celltypes[non_padding_mask]
-                    unique_celltypes = np.unique(final_celltypes)
-                    ellipse_losses = []
-                    for ct in unique_celltypes:
-                        ct_mask = final_celltypes == ct
-                        coords = final_phase_coords[ct_mask]
-                        if coords.shape[0] < 5:
-                            continue
-                        mean = coords.mean(dim=0)
-                        cov = torch.cov(coords.T)
-                        diff = coords - mean
-                        try:
-                            cov_inv = torch.linalg.inv(cov)
-                            ellipse_eq = torch.sum(diff @ cov_inv * diff, dim=1)
-                            ellipse_losses.append(torch.mean((ellipse_eq - 1) ** 2))
-                        except Exception:
-                            continue
-                    if ellipse_losses:
-                        ellipse_loss = torch.mean(torch.stack(ellipse_losses))
+            # if preprocessing_info['train_has_celltype'] and celltypes_array is not None:
+            #     valid_phase_coords = phase_coords[valid_mask_tensor]
+            #     valid_celltypes = celltypes_array[valid_mask_tensor.cpu().numpy()]
+            #     non_padding_mask = valid_celltypes != 'PADDING'
+            #     if non_padding_mask.sum() > 0:
+            #         final_phase_coords = valid_phase_coords[non_padding_mask]
+            #         final_celltypes = valid_celltypes[non_padding_mask]
+            #         unique_celltypes = np.unique(final_celltypes)
+            #         ellipse_losses = []
+            #         for ct in unique_celltypes:
+            #             ct_mask = final_celltypes == ct
+            #             coords = final_phase_coords[ct_mask]
+            #             if coords.shape[0] < 5:
+            #                 continue
+            #             mean = coords.mean(dim=0)
+            #             cov = torch.cov(coords.T)
+            #             diff = coords - mean
+            #             try:
+            #                 cov_inv = torch.linalg.inv(cov)
+            #                 ellipse_eq = torch.sum(diff @ cov_inv * diff, dim=1)
+            #                 ellipse_losses.append(torch.mean((ellipse_eq - 1) ** 2))
+            #             except Exception:
+            #                 continue
+            #         if ellipse_losses:
+            #             ellipse_loss = torch.mean(torch.stack(ellipse_losses))
 
             total_loss = lambda_recon * recon_loss + lambda_time * time_loss + lambda_ellipse * ellipse_loss
             total_loss.backward()
@@ -406,11 +422,13 @@ def predict_and_save_phases(model, test_loader, preprocessing_info, device='cuda
     print("\n=== 预测测试集相位 ===")
     model.eval()
     
+    celltype_to_idx = preprocessing_info.get('celltype_to_idx', {})
+    sample_names = preprocessing_info.get('test_sample_columns', [])
+    
     all_phase_coords = []
     all_phases = []
     all_times = []
     all_celltypes = []
-    sample_indices = []
     
     batch_start_idx = 0
     
@@ -420,7 +438,14 @@ def predict_and_save_phases(model, test_loader, preprocessing_info, device='cuda
             times = batch.get('time', None)
             celltypes = batch.get('celltype', None)
             
-            phase_coords, _ = model(expressions)
+            celltype_indices = None
+            if celltypes is not None and celltype_to_idx:
+                batch_celltype_indices = []
+                for ct in celltypes:
+                    batch_celltype_indices.append(celltype_to_idx.get(ct, 0))
+                celltype_indices = torch.tensor(batch_celltype_indices, device=device)
+            
+            phase_coords, _ = model(expressions, celltype_indices)
             
             phases = coords_to_phase(phase_coords)
             
@@ -428,8 +453,6 @@ def predict_and_save_phases(model, test_loader, preprocessing_info, device='cuda
             all_phases.append(phases.cpu().numpy())
             
             batch_size = expressions.shape[0]
-            batch_indices = list(range(batch_start_idx, batch_start_idx + batch_size))
-            sample_indices.extend(batch_indices)
             batch_start_idx += batch_size
             
             if times is not None:
@@ -452,8 +475,14 @@ def predict_and_save_phases(model, test_loader, preprocessing_info, device='cuda
     
     os.makedirs(save_dir, exist_ok=True)
     
+    if sample_names and len(sample_names) == len(phases):
+        sample_identifiers = sample_names
+    else:
+        sample_identifiers = [f"Sample_{i}" for i in range(len(phases))]
+        print("警告: 无法获取样本名称，使用生成的索引")
+    
     results_data = {
-        'Sample_Index': sample_indices,
+        'Sample_ID': sample_identifiers,
         'Phase_X': phase_coords[:, 0],
         'Phase_Y': phase_coords[:, 1],
         'Predicted_Phase_Radians': phases,
@@ -480,12 +509,9 @@ def predict_and_save_phases(model, test_loader, preprocessing_info, device='cuda
     results_df.to_csv(predictions_file, index=False)
     print(f"详细预测结果保存到: {predictions_file}")
     
-    simple_results = results_df[['Sample_Index', 'Predicted_Phase_Hours']].copy()
-    simple_results.columns = ['Sample_ID', 'Predicted_Phase_Hours']
-    
-    simple_file = os.path.join(save_dir, 'phase_predictions_simple.csv')
-    simple_results.to_csv(simple_file, index=False)
-    print(f"简化预测结果保存到: {simple_file}")
+    simple_results = results_df[['Sample_ID', 'Predicted_Phase_Hours']].copy()
+    simple_results.to_csv(os.path.join(save_dir, 'phase_predictions_simple.csv'), index=False)
+    print(f"简化预测结果保存到: {os.path.join(save_dir, 'phase_predictions_simple.csv')}")
     
     print(f"\n=== 预测统计 ===")
     print(f"预测样本数量: {len(phases)}")
@@ -808,6 +834,8 @@ def plot_gene_expression_with_custom_data(
     print("\n=== 使用自定义基因数据绘制基因表达相位图（原始数据）===")
     model.eval()
     
+    celltype_to_idx = preprocessing_info.get('celltype_to_idx', {})
+    
     all_phase_hours = []
     all_celltypes = []
     
@@ -816,7 +844,15 @@ def plot_gene_expression_with_custom_data(
             expressions = batch['expression'].to(device)
             celltypes = batch.get('celltype', None)
             
-            phase_coords, _ = model(expressions)
+            # 准备细胞类型索引
+            celltype_indices = None
+            if celltypes is not None and celltype_to_idx:
+                batch_celltype_indices = []
+                for ct in celltypes:
+                    batch_celltype_indices.append(celltype_to_idx.get(ct, 0))
+                celltype_indices = torch.tensor(batch_celltype_indices, device=device)
+            
+            phase_coords, _ = model(expressions, celltype_indices)
             phases = coords_to_phase(phase_coords)
             phase_hours = phases.cpu().numpy() * preprocessing_info.get('period_hours', 24.0) / (2 * np.pi)
             
@@ -926,11 +962,14 @@ def main():
     
     model = PhaseAutoEncoder(
         input_dim=args.n_components,
+        n_celltypes=preprocessing_info.get('n_celltypes', 0),
         dropout=args.dropout
     )
     
     print(f"模型参数数量: {sum(p.numel() for p in model.parameters())}")
-
+    if preprocessing_info.get('n_celltypes', 0) > 0:
+        print(f"细胞类型数量: {preprocessing_info['n_celltypes']}")
+    
     print("使用神经网络正弦损失进行端到端训练...")
     train_losses = train_model(
         model=model,

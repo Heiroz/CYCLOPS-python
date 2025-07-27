@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import argparse
 import os
 from tqdm import tqdm
+from sklearn.decomposition import SparsePCA, PCA
 
 class ExpressionDataset(Dataset):
     def __init__(self, expressions, times=None, celltypes=None):
@@ -145,15 +146,11 @@ def load_and_preprocess_train_data(train_file, n_components=50, max_samples=100,
     scaler = StandardScaler()
     expression_scaled = scaler.fit_transform(expression_data)
     
-    print(f"基于训练集进行奇异值分解，选择前 {n_components} 个最重要的基因...")
-    U, s, Vt = np.linalg.svd(expression_scaled.T, full_matrices=False)
-    
-    n_top_components = min(n_components, len(s))
-    gene_importance = np.sum(np.abs(U[:, :n_top_components]) * s[:n_top_components], axis=1)
-    
-    top_gene_indices = np.argsort(gene_importance)[-n_components:][::-1]
-    selected_genes = gene_names[top_gene_indices]
-    selected_expression = expression_scaled[:, top_gene_indices]
+    print("进行PCA变换...")
+    sparse_pca = PCA(n_components=n_components)
+    spc_components = sparse_pca.fit_transform(expression_scaled)
+    explained_variance = sparse_pca.explained_variance_ratio_
+    selected_expression = spc_components
     
     if n_samples > max_samples:
         print(f"样本数量 ({n_samples}) 超过最大限制 ({max_samples})，进行截断...")
@@ -189,29 +186,21 @@ def load_and_preprocess_train_data(train_file, n_components=50, max_samples=100,
         actual_samples = n_samples
         print(f"样本数量正好等于最大限制: {actual_samples}")
     
-    print(f"最终使用的样本数量: {actual_samples}")
-    print(f"选择的基因数量: {len(selected_genes)}")
-    print(f"选择的基因样例: {selected_genes[:10].tolist()}")
-    
     train_dataset = ExpressionDataset(selected_expression, times, celltypes)
     
     preprocessing_info = {
         'scaler': scaler,
-        'selected_gene_indices': top_gene_indices,
-        'selected_genes': selected_genes,
-        'gene_importance_scores': gene_importance[top_gene_indices],
-        'all_gene_names': gene_names,
+        'pca_model': sparse_pca,
+        'spc_components': spc_components,
+        'explained_variance': explained_variance,
         'train_has_time': has_time,
         'train_has_celltype': has_celltype,
         'n_components': n_components,
         'max_samples': max_samples,
         'actual_samples': actual_samples,
         'original_samples': n_samples,
-        'svd_info': {
-            'U': U[:, :n_top_components],
-            's': s[:n_top_components],
-            'Vt': Vt[:n_top_components, :]
-        }
+        'all_gene_names': gene_names,
+        'period_hours': 24.0
     }
     
     return train_dataset, preprocessing_info
@@ -251,39 +240,30 @@ def load_and_preprocess_test_data(test_file, preprocessing_info):
     print(f"测试集样本数量: {n_samples}")
     
     scaler = preprocessing_info['scaler']
-    selected_genes = preprocessing_info['selected_genes']
+    pca_model = preprocessing_info['pca_model']
     n_components = preprocessing_info['n_components']
     
     print("使用训练集的标准化参数处理测试数据...")
     test_expression_scaled = scaler.transform(test_expression_data)
-
-    test_selected_expression = np.zeros((n_samples, n_components))
-    missing_genes = []
-    found_genes = []
-
-    for train_idx, gene in enumerate(selected_genes):
-        if gene in test_gene_names:
-            test_gene_idx = np.where(test_gene_names == gene)[0][0]
-            test_selected_expression[:, train_idx] = test_expression_scaled[:, test_gene_idx]
-            found_genes.append(gene)
-        else:
-            missing_genes.append(gene)
-            test_selected_expression[:, train_idx] = 0
     
-    print(f"测试集中找到的基因数量: {len(found_genes)}")
-    if missing_genes:
-        print(f"测试集中缺失的基因数量: {len(missing_genes)}")
-        print(f"缺失基因样例: {missing_genes[:5]}")
+    print("使用训练集的SPC模型变换测试数据...")
+    test_spc_components = pca_model.transform(test_expression_scaled)
     
-    test_dataset = ExpressionDataset(test_selected_expression, times, celltypes)
+    print(f"SPC变换后的测试数据维度: {test_spc_components.shape}")
+    print(f"期望的SPC组件数量: {n_components}")
+    
+    if test_spc_components.shape[1] != n_components:
+        print(f"警告: SPC组件维度不匹配，期望 {n_components}，实际 {test_spc_components.shape[1]}")
+    
+    test_dataset = ExpressionDataset(test_spc_components, times, celltypes)
     
     test_preprocessing_info = preprocessing_info.copy()
     test_preprocessing_info.update({
         'test_has_time': has_time,
         'test_has_celltype': has_celltype,
         'test_sample_columns': sample_columns,
-        'found_genes': found_genes,
-        'missing_genes': missing_genes
+        'test_gene_names': test_gene_names,
+        'test_spc_components': test_spc_components
     })
     
     return test_dataset, test_preprocessing_info
@@ -369,6 +349,15 @@ def train_model(model, sine_predictor, train_dataset, preprocessing_info,
                                 num_epochs=100, lr=0.001, device='cuda',
                                 lambda_recon=1.0, lambda_time=0.5, lambda_neural_sine=0.1,
                                 period_hours=24.0, save_dir='./model_checkpoints'):
+    
+    if 'train_has_time' not in preprocessing_info:
+        sample = train_dataset[0]
+        preprocessing_info['train_has_time'] = 'time' in sample
+    
+    if 'train_has_celltype' not in preprocessing_info:
+        sample = train_dataset[0]
+        preprocessing_info['train_has_celltype'] = 'celltype' in sample
+    
     model = model.to(device)
     sine_predictor = sine_predictor.to(device)
     
