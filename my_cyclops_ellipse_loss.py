@@ -38,31 +38,55 @@ class PhaseAutoEncoder(nn.Module):
         
         if self.use_celltype:
             self.celltype_embedding = nn.Embedding(n_celltypes, celltype_embedding_dim)
-            encoder_input_dim = input_dim + celltype_embedding_dim
+            self.scale_transform = nn.Linear(celltype_embedding_dim, input_dim)
+            self.additive_transform = nn.Linear(celltype_embedding_dim, input_dim)
+            self.global_bias = nn.Parameter(torch.zeros(input_dim))
+            encoder_input_dim = input_dim
         else:
             encoder_input_dim = input_dim
         
-        self.encoder = nn.Linear(encoder_input_dim, 2)
-        self.decoder = nn.Linear(2, input_dim)
+        self.encoder = nn.Sequential(
+            nn.Linear(encoder_input_dim, 32),
+            nn.ReLU(),
+            nn.Linear(32, 2)
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(2, 32),
+            nn.ReLU(),
+            nn.Linear(32, input_dim)
+        )
+        self.dropout = nn.Dropout(dropout)
     
     def forward(self, x, celltype_indices=None):
         if self.use_celltype and celltype_indices is not None:
             celltype_emb = self.celltype_embedding(celltype_indices)
-            combined_input = torch.cat([x, celltype_emb], dim=1)
+            scale_factor = self.scale_transform(celltype_emb)
+            additive_factor = self.additive_transform(celltype_emb)
+            modified_input = x * (1 + scale_factor) + additive_factor + self.global_bias
         else:
-            combined_input = x
+            modified_input = x
         
-        phase_coords = self.encoder(combined_input)
-        reconstructed = self.decoder(phase_coords)
-        return phase_coords, reconstructed
+        modified_input = self.dropout(modified_input)
+        phase_coords = self.encoder(modified_input)
+        norm = torch.norm(phase_coords, dim=1, keepdim=True) + 1e-8
+        phase_coords_normalized = phase_coords / norm
+        reconstructed = self.decoder(phase_coords_normalized)
+        return phase_coords_normalized, reconstructed
     
     def encode(self, x, celltype_indices=None):
         if self.use_celltype and celltype_indices is not None:
             celltype_emb = self.celltype_embedding(celltype_indices)
-            combined_input = torch.cat([x, celltype_emb], dim=1)
+            scale_factor = self.scale_transform(celltype_emb)
+            additive_factor = self.additive_transform(celltype_emb)
+            modified_input = x * (1 + scale_factor) + additive_factor + self.global_bias
         else:
-            combined_input = x
-        return self.encoder(combined_input)
+            modified_input = x
+        
+        modified_input = self.dropout(modified_input)
+        phase_coords = self.encoder(modified_input)
+        norm = torch.norm(phase_coords, dim=1, keepdim=True) + 1e-8
+        phase_coords_normalized = phase_coords / norm
+        return phase_coords_normalized
     
     def decode(self, phase_coords):
         return self.decoder(phase_coords)
@@ -281,7 +305,7 @@ def train_model(model, train_dataset, preprocessing_info,
     model = model.to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.5)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.9)
     
     recon_criterion = nn.MSELoss()
     
@@ -321,14 +345,13 @@ def train_model(model, train_dataset, preprocessing_info,
     if all_celltypes:
         celltypes_array = np.array(all_celltypes)
     
-    # 准备细胞类型索引
     celltype_indices_tensor = None
     if preprocessing_info['train_has_celltype'] and celltypes_array is not None:
         celltype_to_idx = preprocessing_info['celltype_to_idx']
         celltype_indices = []
         for ct in celltypes_array:
             if ct == 'PADDING':
-                celltype_indices.append(0)  # 用0表示PADDING
+                celltype_indices.append(0)
             else:
                 celltype_indices.append(celltype_to_idx.get(ct, 0))
         celltype_indices_tensor = torch.tensor(celltype_indices, device=device)
@@ -343,12 +366,10 @@ def train_model(model, train_dataset, preprocessing_info,
     
     with tqdm(total=num_epochs, desc="Joint Training Progress") as pbar:
         for epoch in range(num_epochs):
-            model.train()            
+            model.train()
             optimizer.zero_grad()
             
-            # 传入细胞类型信息
             phase_coords, reconstructed = model(expressions_tensor, celltype_indices_tensor)
-            
             if valid_mask_tensor.sum() > 0:
                 valid_expressions = expressions_tensor[valid_mask_tensor]
                 valid_reconstructed = reconstructed[valid_mask_tensor]
@@ -363,34 +384,42 @@ def train_model(model, train_dataset, preprocessing_info,
                 if len(valid_times) > 0:
                     time_loss = time_supervision_loss(valid_phase_coords, valid_times, 1.0, period_hours)
             
-            ellipse_loss = torch.tensor(0.0, device=device)
-            # if preprocessing_info['train_has_celltype'] and celltypes_array is not None:
-            #     valid_phase_coords = phase_coords[valid_mask_tensor]
-            #     valid_celltypes = celltypes_array[valid_mask_tensor.cpu().numpy()]
-            #     non_padding_mask = valid_celltypes != 'PADDING'
-            #     if non_padding_mask.sum() > 0:
-            #         final_phase_coords = valid_phase_coords[non_padding_mask]
-            #         final_celltypes = valid_celltypes[non_padding_mask]
-            #         unique_celltypes = np.unique(final_celltypes)
-            #         ellipse_losses = []
-            #         for ct in unique_celltypes:
-            #             ct_mask = final_celltypes == ct
-            #             coords = final_phase_coords[ct_mask]
-            #             if coords.shape[0] < 5:
-            #                 continue
-            #             mean = coords.mean(dim=0)
-            #             cov = torch.cov(coords.T)
-            #             diff = coords - mean
-            #             try:
-            #                 cov_inv = torch.linalg.inv(cov)
-            #                 ellipse_eq = torch.sum(diff @ cov_inv * diff, dim=1)
-            #                 ellipse_losses.append(torch.mean((ellipse_eq - 1) ** 2))
-            #             except Exception:
-            #                 continue
-            #         if ellipse_losses:
-            #             ellipse_loss = torch.mean(torch.stack(ellipse_losses))
-
-            total_loss = lambda_recon * recon_loss + lambda_time * time_loss + lambda_ellipse * ellipse_loss
+            diversity_loss = torch.tensor(0.0, device=device)
+            if preprocessing_info['train_has_celltype'] and celltypes_array is not None:
+                valid_phase_coords = phase_coords[valid_mask_tensor]
+                valid_celltypes = celltypes_array[valid_mask_tensor.cpu().numpy()]
+                non_padding_mask = valid_celltypes != 'PADDING'
+                if non_padding_mask.sum() > 0:
+                    final_phase_coords = valid_phase_coords[non_padding_mask]
+                    final_celltypes = valid_celltypes[non_padding_mask]
+                    unique_celltypes = np.unique(final_celltypes)
+                    diversity_losses = []
+                    for ct in unique_celltypes:
+                        ct_mask = final_celltypes == ct
+                        coords = final_phase_coords[ct_mask]
+                        if coords.shape[0] < 3:
+                            continue
+                        phases = coords_to_phase(coords)
+                        n_bins = min(24, max(6, coords.shape[0] // 2))
+                        hist = torch.histc(phases, bins=n_bins, min=0, max=2*np.pi)
+                        prob = hist / hist.sum()
+                        prob = torch.clamp(prob, min=1e-8)
+                        
+                        # 计算熵（正值）
+                        entropy = -torch.sum(prob * torch.log(prob))
+                        # 标准化熵值
+                        max_entropy = torch.log(torch.tensor(n_bins, dtype=torch.float32, device=device))
+                        normalized_entropy = entropy / max_entropy
+                        
+                        # 转换为正值且越小越好：1 - normalized_entropy
+                        # 当完全均匀时，normalized_entropy = 1，损失 = 0
+                        # 当完全聚集时，normalized_entropy = 0，损失 = 1
+                        uniformity_loss = 1.0 - normalized_entropy
+                        diversity_losses.append(uniformity_loss)
+                        
+                    if diversity_losses:
+                        diversity_loss = torch.mean(torch.stack(diversity_losses))
+            total_loss = lambda_recon * recon_loss + lambda_time * time_loss + lambda_ellipse * diversity_loss * 1000
             total_loss.backward()
             optimizer.step()
             
@@ -403,7 +432,7 @@ def train_model(model, train_dataset, preprocessing_info,
                     'Train loss': f'{total_loss.item():.4f}',
                     'Recon': f'{recon_loss.item():.4f}',
                     'Time': f'{time_loss.item():.4f}',
-                    'Ellipse': f'{ellipse_loss.item():.4f}',
+                    'Diversity': f'{diversity_loss.item():.4f}',
                     'LR': f'{scheduler.get_last_lr()[0]:.6f}'
                 })
             

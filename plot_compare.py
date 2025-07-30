@@ -101,7 +101,7 @@ def compare(path_1, path_2, save_path):
     plt.savefig(save_path_file)
     print(f"figure saved in {save_path_file}")
 
-path_1 = "Zhang_CancerCell_2025.Sample_MajorCluster"
+path_1 = "Zhang_CancerCell_2025.Sample_SubCluster_CD4_CD8_2"
 path_2 = "Zhang_CancerCell_2025.Sample_SubCluster_CD4_CD8"
 save_path = "plot"
 
