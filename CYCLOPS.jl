@@ -2305,10 +2305,18 @@ function CovariateOnehotEncoder!(Transform, ops)
 				Transform_copy = vcat(Transform_copy, ops[:o_dcorr]...)
 				# Calculate standard deviation for each discontinuous covariate group
 				for ii in ops[:o_dco]
-					batch_std = mapslices(x -> [std(Transform[:, Bool.(x)], dims = 2)], ii, dims = 2)
-					scales = map(x -> (batch_std[1] ./ x) .- 1, batch_std[2:end])
-					append!(scale_array, scales)					
-				end
+					print("1")
+                    batch_std = mapslices(x -> [std(Transform[:, Bool.(x)], dims = 2)], ii, dims = 2)
+                    eps_val = 1e-8
+                    scales = map(x -> begin
+                        denominator = max.(x, eps_val)
+                        result = (batch_std[1] ./ denominator) .- 1
+                        result[isnan.(result)] .= 0.0
+                        result[isinf.(result)] .= sign.(result[isinf.(result)]) .* 100.0
+                        return result
+                    end, batch_std[2:end])
+                    append!(scale_array, scales)					
+                end
 			else
 				more_than_one_covariate = length(ops[:out_disc_cov]) > 1
 				if more_than_one_covariate
@@ -2317,15 +2325,31 @@ function CovariateOnehotEncoder!(Transform, ops)
 					Transform_copy = vcat(Transform_copy, ops[:o_dcorr][ops[:out_disc_cov]])
 				end
 				if more_than_one_covariate
-					for ii in ops[:o_dco][ops[:out_disc_cov]]
-						batch_std = mapslices(x -> [std(Transform[:, Bool.(x)], dims = 2)], ii, dims = 2)
-						scales = map(x -> (batch_std[1] ./ x) .- 1, batch_std[2:end])
-						append!(scale_array, scales)					
-					end
+					print("2")
+                    for ii in ops[:o_dco][ops[:out_disc_cov]]
+                        batch_std = mapslices(x -> [std(Transform[:, Bool.(x)], dims = 2)], ii, dims = 2)
+                        eps_val = 1e-8
+                        scales = map(x -> begin
+                            denominator = max.(x, eps_val)
+                            result = (batch_std[1] ./ denominator) .- 1
+                            result[isnan.(result)] .= 0.0
+                            result[isinf.(result)] .= sign.(result[isinf.(result)]) .* 100.0
+                            return result
+                        end, batch_std[2:end])
+                        append!(scale_array, scales)					
+                    end
 				else
-					batch_std = mapslices(x -> [std(Transform[:, Bool.(x)], dims = 2)], ops[:o_dco][ops[:out_disc_cov]], dims = 2)
-					scales = map(x -> (batch_std[1] ./ x) .- 1, batch_std[2:end])
-					append!(scale_array, scales)
+					print("3")
+                    batch_std = mapslices(x -> [std(Transform[:, Bool.(x)], dims = 2)], ops[:o_dco][ops[:out_disc_cov]], dims = 2)
+                    eps_val = 1e-8
+                    scales = map(x -> begin
+                        denominator = max.(x, eps_val)
+                        result = (batch_std[1] ./ denominator) .- 1
+                        result[isnan.(result)] .= 0.0
+                        result[isinf.(result)] .= sign.(result[isinf.(result)]) .* 100.0
+                        return result
+                    end, batch_std[2:end])
+                    append!(scale_array, scales)
 				end
 			end
 		end
