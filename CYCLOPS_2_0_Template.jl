@@ -2,7 +2,7 @@ using DataFrames, Statistics, StatsBase, LinearAlgebra, MultivariateStats, PyPlo
 
 base_path = "/home/xuzhen/CYCLOPS-2.0"
 data_path = "/home/xuzhen/CYCLOPS-2.0/data/"
-dataset_path_1 = "ZeminZhang_CD4T"
+dataset_path_1 = "ZeminZhang_CD4T_1_cov"
 dataset_path_2 = "Zhang_CancerCell_2025.Sample_MajorCluster"
 path_to_cyclops = joinpath(base_path, "CYCLOPS.jl")
 output_path = joinpath(base_path, "output")
@@ -54,7 +54,7 @@ training_parameters = Dict(:regex_cont => r".*_C",			# What is the regex match f
 
 :seed_min_CV => 0.14, 							# The minimum coefficient of variation a gene of interest may have to be included in eigen gene transformation
 :seed_max_CV => 0.9, 							# The maximum coefficient of a variation a gene of interest may have to be included in eigen gene transformation
-:seed_mth_Gene => 10000, 						# The minimum mean a gene of interest may have to be included in eigen gene transformation
+:seed_mth_Gene => 5000, 						# The minimum mean a gene of interest may have to be included in eigen gene transformation
 
 :norm_gene_level => true, 						# Does mean normalization occur at the seed gene level
 :norm_disc => false, 							# Does batch mean normalization occur at the seed gene level
