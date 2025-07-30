@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 from typing import Dict, Any
-import CYCLOPS
+import python.CYCLOPS as CYCLOPS
 
 base_path = "/home/xuzhen/CYCLOPS-2.0"
 data_path = os.path.join(base_path, "data")
