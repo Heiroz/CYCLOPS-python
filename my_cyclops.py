@@ -501,37 +501,8 @@ def train_model(model, train_dataset, preprocessing_info,
                 valid_times = times_tensor[valid_mask_tensor]
                 if len(valid_times) > 0:
                     time_loss = time_supervision_loss(valid_phase_coords, valid_times, 1.0, period_hours)
-            
-            diversity_loss = torch.tensor(0.0, device=device)
-            if preprocessing_info['train_has_celltype'] and celltypes_array is not None:
-                valid_phase_coords = phase_coords[valid_mask_tensor]
-                valid_celltypes = celltypes_array[valid_mask_tensor.cpu().numpy()]
-                non_padding_mask = valid_celltypes != 'PADDING'
-                if non_padding_mask.sum() > 0:
-                    final_phase_coords = valid_phase_coords[non_padding_mask]
-                    final_celltypes = valid_celltypes[non_padding_mask]
-                    unique_celltypes = np.unique(final_celltypes)
-                    diversity_losses = []
-                    for ct in unique_celltypes:
-                        ct_mask = final_celltypes == ct
-                        coords = final_phase_coords[ct_mask]
-                        if coords.shape[0] < 3:
-                            continue
-                        phases = coords_to_phase(coords)
-                        n_bins = min(24, max(6, coords.shape[0] // 2))
-                        hist = torch.histc(phases, bins=n_bins, min=0, max=2*np.pi)
-                        prob = hist / hist.sum()
-                        prob = torch.clamp(prob, min=1e-8)
-                        
-                        entropy = -torch.sum(prob * torch.log(prob))
-                        max_entropy = torch.log(torch.tensor(n_bins, dtype=torch.float32, device=device))
-                        normalized_entropy = entropy / max_entropy
-                        uniformity_loss = 1.0 - normalized_entropy
-                        diversity_losses.append(uniformity_loss)
-                        
-                    if diversity_losses:
-                        diversity_loss = torch.mean(torch.stack(diversity_losses))
-            total_loss = lambda_recon * recon_loss + lambda_time * time_loss + lambda_ellipse * diversity_loss * 1000
+
+            total_loss = lambda_recon * recon_loss + lambda_time * time_loss
             total_loss.backward()
             optimizer.step()
             
@@ -544,7 +515,6 @@ def train_model(model, train_dataset, preprocessing_info,
                     'Train loss': f'{total_loss.item():.4f}',
                     'Recon': f'{recon_loss.item():.4f}',
                     'Time': f'{time_loss.item():.4f}',
-                    'Diversity': f'{diversity_loss.item():.4f}',
                     'LR': f'{scheduler.get_last_lr()[0]:.6f}'
                 })
             
