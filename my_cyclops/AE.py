@@ -31,18 +31,7 @@ class PhaseAutoEncoder(nn.Module):
         self.dropout = nn.Dropout(dropout)
     
     def forward(self, x, celltype_indices=None):
-        if self.use_celltype and celltype_indices is not None:
-            celltype_emb = self.celltype_embedding(celltype_indices)
-            scale_factor = self.scale_transform(celltype_emb)
-            additive_factor = self.additive_transform(celltype_emb)
-            modified_input = x * (1 + scale_factor) + additive_factor + self.global_bias
-        else:
-            modified_input = x
-        
-        modified_input = self.dropout(modified_input)
-        phase_coords = self.encoder(modified_input)
-        norm = torch.norm(phase_coords, dim=1, keepdim=True) + 1e-8
-        phase_coords_normalized = phase_coords / norm
+        phase_coords_normalized = self.encode(x, celltype_indices)
         reconstructed = self.decoder(phase_coords_normalized)
         return phase_coords_normalized, reconstructed
     
@@ -59,6 +48,9 @@ class PhaseAutoEncoder(nn.Module):
         phase_coords = self.encoder(modified_input)
         norm = torch.norm(phase_coords, dim=1, keepdim=True) + 1e-8
         phase_coords_normalized = phase_coords / norm
+        # add noise when training
+        noise = torch.randn_like(phase_coords_normalized) * 0.01
+        phase_coords_normalized += noise
         return phase_coords_normalized
     
     def decode(self, phase_coords):

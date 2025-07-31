@@ -170,7 +170,6 @@ def load_and_preprocess_test_data(test_file, preprocessing_info):
     test_expression_scaled = scaler.transform(test_expression_data)
     
     print("使用训练集的细胞类型感知变换器处理测试数据...")
-    # 使用新的细胞类型感知变换器
     test_spc_components = pca_model.transform(test_expression_scaled)
     
     print(f"细胞类型感知变换后的测试数据维度: {test_spc_components.shape}")

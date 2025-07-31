@@ -34,7 +34,7 @@ def time_supervision_loss(phase_coords, true_times, lambda_time=1.0, period_hour
 
 def train_model(model, train_dataset, preprocessing_info, 
                 num_epochs=100, lr=0.001, device='cuda',
-                lambda_recon=1.0, lambda_time=0.5, lambda_ellipse=0.1,
+                lambda_recon=1.0, lambda_time=0.5,
                 period_hours=24.0, save_dir='./model_checkpoints'):
     
     if 'train_has_time' not in preprocessing_info:
@@ -48,7 +48,7 @@ def train_model(model, train_dataset, preprocessing_info,
     model = model.to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=500, gamma=0.9)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5000, gamma=0.9)
     
     recon_criterion = nn.MSELoss()
     
@@ -227,7 +227,6 @@ def main():
         device=args.device,
         lambda_recon=args.lambda_recon,
         lambda_time=args.lambda_time,
-        lambda_ellipse=args.lambda_sine,
         period_hours=args.period_hours,
         save_dir=args.save_dir
     )
