@@ -49,7 +49,7 @@ class PhaseAutoEncoder(nn.Module):
         norm = torch.norm(phase_coords, dim=1, keepdim=True) + 1e-8
         phase_coords_normalized = phase_coords / norm
         # add noise when training
-        noise = torch.randn_like(phase_coords_normalized) * 0.01
+        noise = torch.randn_like(phase_coords_normalized) * 0.3
         phase_coords_normalized += noise
         return phase_coords_normalized
     
