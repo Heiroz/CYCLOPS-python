@@ -3,7 +3,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 from sklearn.preprocessing import StandardScaler
-from PCA import create_celltype_aware_eigengenes
+from PCA import create_eigengenes
 
 class ExpressionDataset(Dataset):
     def __init__(self, expressions, times=None, celltypes=None):
@@ -63,9 +63,8 @@ def load_and_preprocess_train_data(train_file, n_components=50, max_samples=100,
     scaler = StandardScaler()
     expression_scaled = scaler.fit_transform(expression_data)
     
-    # 使用新的细胞类型感知eigengenes创建方法
-    selected_expression, pca_model, explained_variance = create_celltype_aware_eigengenes(
-        expression_scaled, celltypes, times, n_components, period_hours=24.0
+    selected_expression, pca_model, explained_variance = create_eigengenes(
+        expression_scaled, n_components
     )
     
     if n_samples > max_samples:
@@ -112,7 +111,7 @@ def load_and_preprocess_train_data(train_file, n_components=50, max_samples=100,
     
     preprocessing_info = {
         'scaler': scaler,
-        'pca_model': pca_model,  # 现在是细胞类型感知变换器
+        'pca_model': pca_model,
         'spc_components': selected_expression,
         'explained_variance': explained_variance,
         'train_has_time': has_time,
@@ -172,7 +171,7 @@ def load_and_preprocess_test_data(test_file, preprocessing_info):
     
     print("使用训练集的细胞类型感知变换器处理测试数据...")
     # 使用新的细胞类型感知变换器
-    test_spc_components = pca_model.transform(test_expression_scaled, times)
+    test_spc_components = pca_model.transform(test_expression_scaled)
     
     print(f"细胞类型感知变换后的测试数据维度: {test_spc_components.shape}")
     print(f"期望的组件数量: {n_components}")

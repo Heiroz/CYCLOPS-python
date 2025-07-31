@@ -9,8 +9,14 @@ import argparse
 import os
 from tqdm import tqdm
 from AE import PhaseAutoEncoder
-from utils import time_to_phase, coords_to_phase, predict_and_save_phases, plot_eigengenes_2d_with_phase_gradient, plot_gene_expression_with_custom_data, get_original_gene_expressions
-from dataset import load_and_preprocess_train_data, load_and_preprocess_test_data
+from utils import (
+    time_to_phase, coords_to_phase, predict_and_save_phases,
+    plot_eigengenes_2d_with_phase_gradient, plot_gene_expression_with_custom_data,
+    get_original_gene_expressions
+)
+from dataset import (
+    load_and_preprocess_train_data, load_and_preprocess_test_data
+)
 
 def time_supervision_loss(phase_coords, true_times, lambda_time=1.0, period_hours=24.0):
     if true_times is None:
