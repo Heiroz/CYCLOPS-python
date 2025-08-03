@@ -7,10 +7,3 @@ def create_eigengenes(expression_scaled, n_components=50):
     explained_variance = pca.explained_variance_ratio_
     
     return components, pca, explained_variance
-
-class SimplePCATransformer:
-    def __init__(self, pca):
-        self.pca = pca
-    
-    def transform(self, X_scaled):
-        return self.pca.transform(X_scaled)
