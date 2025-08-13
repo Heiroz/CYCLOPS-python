@@ -513,8 +513,8 @@ def get_circadian_gene_expressions(data_info, circadian_genes):
 
 def main():
     expression_file = Config.DEFAULT_EXPRESSION_FILE
-    n_components = 50
-    
+    n_components = Config.N_COMPONENTS
+
     import datetime
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = f"result_{timestamp}_components{n_components}"
