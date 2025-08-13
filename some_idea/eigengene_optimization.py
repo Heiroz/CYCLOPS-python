@@ -12,8 +12,147 @@ import os
 # Add the my_cyclops directory to path to import modules
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'my_cyclops'))
 
-def create_eigengenes(expression_scaled, n_components=50):
+# ================================
+# CONFIGURABLE PARAMETERS
+# ================================
+
+class Config:
+    """Configuration class containing all adjustable parameters"""
+    
+    # === Data Processing Parameters ===
+    N_COMPONENTS = 50  # Number of PCA components for eigengenes
+    MIN_SAMPLES_PER_CELLTYPE = 10  # Minimum samples required for cell type processing
+    
+    # === Optimization Parameters ===
+    # Default optimization settings
+    DEFAULT_SMOOTHNESS_FACTOR = 0.7
+    DEFAULT_LOCAL_VARIATION_FACTOR = 0.3
+    DEFAULT_WINDOW_SIZE = 10
+    
+    # TSP optimization parameters
+    MAX_ITERATIONS_RATIO = 50  # Max iterations = min(MAX_ITERATIONS_RATIO, n_samples)
+    VARIATION_TOLERANCE_RATIO = 0.5  # Max variation tolerance as ratio of base distance
+    
+    # Smoothness analysis parameters
+    LOCAL_VARIATION_WINDOW_DIVISOR = 5  # window_size = min(10, len(data) // divisor)
+    BALANCE_SCORE_VARIATION_WEIGHT = 0.1  # Weight for local variation in balance score
+    
+    # === Curve Fitting Parameters ===
+    SINE_FIT_MAX_ITERATIONS = 2000  # Maximum iterations for sine curve fitting
+    SINE_FIT_SMOOTH_POINTS = 200  # Number of points for smooth curve generation
+    
+    # === Gene Lists ===
+    CIRCADIAN_GENES = [
+        'PER1', 'PER2', 'PER3', 'CRY1', 'CRY2', 
+        'CLOCK', 'ARNTL', 'NR1D1', 'NR1D2', 'DBP'
+    ]
+    
+    # === Optimization Configurations ===
+    SMOOTHNESS_CONFIGS = [
+        {'smoothness_factor': 1.0, 'local_variation_factor': 0.0, 'name': 'Pure Smoothness'},
+        {'smoothness_factor': 0.8, 'local_variation_factor': 0.2, 'name': 'Mostly Smooth'},
+        {'smoothness_factor': 0.7, 'local_variation_factor': 0.3, 'name': 'Balanced'},
+        {'smoothness_factor': 0.6, 'local_variation_factor': 0.4, 'name': 'More Variation'},
+        {'smoothness_factor': 0.5, 'local_variation_factor': 0.5, 'name': 'Equal Balance'}
+    ]
+    
+    # === Eigengene Weights ===
+    # Weights for different eigengene components (first components get higher weight)
+    @staticmethod
+    def get_eigengene_weights(n_components):
+        """Generate eigengene weights based on component importance"""
+        if n_components <= 50:
+            # Standard weighting for up to 50 components
+            weights = []
+            weights.extend([1.0])  # First component
+            weights.extend([0.8] * min(10, n_components - 1))  # Next 10 components
+            if n_components > 11:
+                weights.extend([0.6] * min(15, n_components - 11))  # Next 15 components
+            if n_components > 26:
+                weights.extend([0.4] * (n_components - 26))  # Remaining components
+            return weights[:n_components]
+        else:
+            # Extended weighting for more components
+            weights = []
+            weights.extend([1.0])  # First component
+            weights.extend([0.8] * 10)  # Next 10 components
+            weights.extend([0.6] * 15)  # Next 15 components
+            weights.extend([0.4] * 24)  # Next 24 components (total 50)
+            # Additional components get decreasing weights
+            remaining = n_components - 50
+            if remaining > 0:
+                weights.extend([0.2] * min(25, remaining))  # Next 25 components
+                if remaining > 25:
+                    weights.extend([0.1] * (remaining - 25))  # All remaining
+            return weights[:n_components]
+    
+    # === Visualization Parameters ===
+    # Figure parameters
+    FIGURE_DPI = 300
+    SUBPLOT_WIDTH_PER_GENE = 3  # Width per gene subplot
+    SUBPLOT_HEIGHT_PER_CELLTYPE = 3  # Height per cell type subplot
+    EIGENGENE_SUBPLOT_WIDTH = 4  # Width per eigengene subplot
+    EIGENGENE_SUBPLOT_HEIGHT = 3  # Height per configuration subplot
+    MAX_EIGENGENES_PLOT = 5  # Maximum number of eigengenes to plot
+    
+    # Plot styling parameters
+    SCATTER_SIZE_MAIN = 25  # Size of scatter points in main plots
+    SCATTER_SIZE_EIGENGENE = 20  # Size of scatter points in eigengene plots
+    SCATTER_ALPHA = 0.7  # Transparency of scatter points
+    LINE_WIDTH_MAIN = 2.5  # Line width for main plots
+    LINE_WIDTH_EIGENGENE = 2.0  # Line width for eigengene plots
+    LINE_ALPHA = 0.8  # Transparency of fitted lines
+    EDGE_LINE_WIDTH_MAIN = 0.5  # Edge line width for main scatter points
+    EDGE_LINE_WIDTH_EIGENGENE = 0.3  # Edge line width for eigengene scatter points
+    GRID_ALPHA = 0.3  # Grid transparency
+    
+    # Color settings
+    COLORMAP = 'viridis'  # Colormap for scatter plots
+    EDGE_COLOR = 'white'  # Edge color for scatter points
+    
+    # === File I/O Parameters ===
+    # Default file paths (can be overridden)
+    DEFAULT_EXPRESSION_FILE = r"d:/CriticalFile/Preprocess_CIRCADIA/CYCLOPS-python/data/Zhang_CancerCell_2025.Sample_SubCluster/expression.csv"
+    
+    # Output naming
+    RESULT_DIR_PREFIX = "result"
+    OUTPUT_FIGURE_FORMAT = "png"
+    
+    # === Data Validation Parameters ===
+    INVALID_VALUE_REPLACEMENT = 0.0  # Value to replace invalid/NaN values with
+    
+    @classmethod
+    def print_config(cls):
+        """Print current configuration"""
+        print("=" * 60)
+        print("CURRENT CONFIGURATION")
+        print("=" * 60)
+        print(f"Data Processing:")
+        print(f"  - PCA Components: {cls.N_COMPONENTS}")
+        print(f"  - Min samples per cell type: {cls.MIN_SAMPLES_PER_CELLTYPE}")
+        print(f"Optimization:")
+        print(f"  - Default smoothness factor: {cls.DEFAULT_SMOOTHNESS_FACTOR}")
+        print(f"  - Default local variation factor: {cls.DEFAULT_LOCAL_VARIATION_FACTOR}")
+        print(f"  - Default window size: {cls.DEFAULT_WINDOW_SIZE}")
+        print(f"  - Max iterations ratio: {cls.MAX_ITERATIONS_RATIO}")
+        print(f"Visualization:")
+        print(f"  - Figure DPI: {cls.FIGURE_DPI}")
+        print(f"  - Scatter size: {cls.SCATTER_SIZE_MAIN}")
+        print(f"  - Line width: {cls.LINE_WIDTH_MAIN}")
+        print(f"Genes of Interest:")
+        print(f"  - Circadian genes: {', '.join(cls.CIRCADIAN_GENES)}")
+        print(f"Configurations: {len(cls.SMOOTHNESS_CONFIGS)} optimization strategies")
+        print("=" * 60)
+
+# ================================
+# END OF CONFIGURABLE PARAMETERS
+# ================================
+
+def create_eigengenes(expression_scaled, n_components=None):
     """Create eigengenes using PCA"""
+    if n_components is None:
+        n_components = Config.N_COMPONENTS
+        
     print("Performing PCA transformation...")
     pca = PCA(n_components=n_components)
     components = pca.fit_transform(expression_scaled)
@@ -43,12 +182,12 @@ def fit_sine_curve(x_data, y_data):
         # Fit the curve
         popt, _ = curve_fit(sine_func, x_data, y_data, 
                            p0=[amplitude_guess, phase_guess, offset_guess],
-                           maxfev=2000)
+                           maxfev=Config.SINE_FIT_MAX_ITERATIONS)
         
         amplitude, phase, offset = popt
         
         # Generate smooth curve for plotting
-        x_smooth = np.linspace(x_data[0], x_data[-1], 200)
+        x_smooth = np.linspace(x_data[0], x_data[-1], Config.SINE_FIT_SMOOTH_POINTS)
         y_smooth = sine_func(x_smooth, amplitude, phase, offset)
         
         # Calculate R-squared
@@ -62,21 +201,29 @@ def fit_sine_curve(x_data, y_data):
     except Exception as e:
         print(f"Warning: Sine fitting failed: {e}")
         # Return a flat line if fitting fails
-        x_smooth = np.linspace(x_data[0], x_data[-1], 200)
+        x_smooth = np.linspace(x_data[0], x_data[-1], Config.SINE_FIT_SMOOTH_POINTS)
         y_smooth = np.full_like(x_smooth, np.mean(y_data))
         return x_smooth, y_smooth, 0.0, [0, 0, np.mean(y_data)]
 
-def multi_scale_optimize(x, weights=None, smoothness_factor=0.7, local_variation_factor=0.3, window_size=10):
+def multi_scale_optimize(x, weights=None, smoothness_factor=None, local_variation_factor=None, window_size=None):
     """
     Multi-scale optimization: balance global smoothness with local variation
     
     Parameters:
     x: data matrix (n_samples, n_dimensions)
     weights: dimension weights
-    smoothness_factor: weight for global smoothness (0-1)
-    local_variation_factor: weight for preserving local patterns (0-1)
-    window_size: size of local windows for variation analysis
+    smoothness_factor: weight for global smoothness (0-1), defaults to Config.DEFAULT_SMOOTHNESS_FACTOR
+    local_variation_factor: weight for preserving local patterns (0-1), defaults to Config.DEFAULT_LOCAL_VARIATION_FACTOR
+    window_size: size of local windows for variation analysis, defaults to Config.DEFAULT_WINDOW_SIZE
     """
+    # Set default values from Config if not provided
+    if smoothness_factor is None:
+        smoothness_factor = Config.DEFAULT_SMOOTHNESS_FACTOR
+    if local_variation_factor is None:
+        local_variation_factor = Config.DEFAULT_LOCAL_VARIATION_FACTOR
+    if window_size is None:
+        window_size = Config.DEFAULT_WINDOW_SIZE
+        
     n_samples = x.shape[0]
     n_dims = x.shape[1]
     
@@ -113,7 +260,7 @@ def multi_scale_optimize(x, weights=None, smoothness_factor=0.7, local_variation
             # If both regions have high variation, allow more difference
             avg_local_std = (local_std_i + local_std_j) / 2
             if avg_local_std > 0:
-                variation_tolerance = min(avg_local_std * local_variation_factor, base_dist * 0.5)
+                variation_tolerance = min(avg_local_std * local_variation_factor, base_dist * Config.VARIATION_TOLERANCE_RATIO)
                 local_variation_penalty -= variation_tolerance * weights[dim]
         
         return base_dist + local_variation_penalty
@@ -164,7 +311,7 @@ def multi_scale_optimize(x, weights=None, smoothness_factor=0.7, local_variation
         improved = True
         
         iterations = 0
-        max_iterations = min(50, n_samples)  # Limit iterations to prevent over-optimization
+        max_iterations = min(Config.MAX_ITERATIONS_RATIO, n_samples)  # Limit iterations to prevent over-optimization
         
         while improved and iterations < max_iterations:
             improved = False
@@ -204,7 +351,7 @@ def analyze_smoothness_and_variation(data, ranks):
     global_diff = np.mean(np.abs(ordered_data[1:] - ordered_data[:-1]))
     
     # Local variation metrics
-    window_size = min(10, len(ordered_data) // 5)
+    window_size = min(Config.DEFAULT_WINDOW_SIZE, len(ordered_data) // Config.LOCAL_VARIATION_WINDOW_DIVISOR)
     local_variations = []
     
     for i in range(len(ordered_data) - window_size + 1):
@@ -227,14 +374,16 @@ def analyze_smoothness_and_variation(data, ranks):
         'global_smoothness': 1.0 / (1.0 + global_diff),  # Higher = smoother
         'local_variation': avg_local_variation,
         'trend_smoothness': avg_trend_smoothness,
-        'balance_score': avg_trend_smoothness * (1.0 + 0.1 * avg_local_variation)  # Good balance score
+        'balance_score': avg_trend_smoothness * (1.0 + Config.BALANCE_SCORE_VARIATION_WEIGHT * avg_local_variation)  # Good balance score
     }
 
-def load_and_process_expression_data(expression_file, n_components=50):
+def load_and_process_expression_data(expression_file, n_components=None):
     """
     Load expression data and perform PCA to get eigengenes
     Based on the my_cyclops approach
     """
+    if n_components is None:
+        n_components = Config.N_COMPONENTS
     print("=== Loading Expression Data ===")
     print(f"File: {expression_file}")
     
@@ -287,7 +436,7 @@ def load_and_process_expression_data(expression_file, n_components=50):
                 value = float(expression_data_raw[j, i])
                 expression_data[i, j] = value
             except (ValueError, TypeError):
-                expression_data[i, j] = 0.0  # Set invalid values to 0
+                expression_data[i, j] = Config.INVALID_VALUE_REPLACEMENT  # Set invalid values to configured replacement
     
     print(f"Number of genes: {len(gene_names)}")
     print(f"Expression data shape: {expression_data.shape}")
@@ -342,7 +491,7 @@ def get_circadian_gene_expressions(data_info, circadian_genes):
             if gene_expr.dtype == 'object' or not np.issubdtype(gene_expr.dtype, np.number):
                 try:
                     gene_expr = pd.to_numeric(gene_expr, errors='coerce')
-                    gene_expr = np.nan_to_num(gene_expr, nan=0.0)
+                    gene_expr = np.nan_to_num(gene_expr, nan=Config.INVALID_VALUE_REPLACEMENT)
                 except:
                     gene_expr = np.zeros_like(gene_expr, dtype=float)
             
@@ -363,7 +512,7 @@ def get_circadian_gene_expressions(data_info, circadian_genes):
     return gene_expressions, found_genes
 
 def main():
-    expression_file = r"d:/CriticalFile/Preprocess_CIRCADIA/CYCLOPS-python/data/Zhang_CancerCell_2025.Sample_SubCluster/expression.csv"
+    expression_file = Config.DEFAULT_EXPRESSION_FILE
     n_components = 50
     
     import datetime
@@ -566,7 +715,7 @@ def create_circadian_gene_visualization(all_results, circadian_genes, celltypes,
                                edgecolors='white', linewidth=0.5, zorder=3)
             
             # Fit and plot sine curve
-            x_smooth, y_smooth, r_squared, fit_params = fit_sine_curve(x_range, gene_values)
+            x_smooth, y_smooth, r_squared, _ = fit_sine_curve(x_range, gene_values)
             ax.plot(x_smooth, y_smooth, '-', color=colors[gene_idx], 
                    linewidth=2.5, alpha=0.8, label=f'Sine fit (R²={r_squared:.3f})', zorder=2)
             
