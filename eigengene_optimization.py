@@ -9,45 +9,32 @@ from scipy.optimize import curve_fit
 import sys
 import os
 
-# Add the my_cyclops directory to path to import modules
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'my_cyclops'))
-
-# ================================
-# CONFIGURABLE PARAMETERS
-# ================================
 
 class Config:
     """Configuration class containing all adjustable parameters"""
     
-    # === Data Processing Parameters ===
-    N_COMPONENTS = 50  # Number of PCA components for eigengenes
-    MIN_SAMPLES_PER_CELLTYPE = 10  # Minimum samples required for cell type processing
+    N_COMPONENTS = 50
+    MIN_SAMPLES_PER_CELLTYPE = 10
     
-    # === Optimization Parameters ===
-    # Default optimization settings
     DEFAULT_SMOOTHNESS_FACTOR = 0.7
     DEFAULT_LOCAL_VARIATION_FACTOR = 0.3
     DEFAULT_WINDOW_SIZE = 10
     
-    # TSP optimization parameters
-    MAX_ITERATIONS_RATIO = 50  # Max iterations = min(MAX_ITERATIONS_RATIO, n_samples)
-    VARIATION_TOLERANCE_RATIO = 0.5  # Max variation tolerance as ratio of base distance
+    MAX_ITERATIONS_RATIO = 50
+    VARIATION_TOLERANCE_RATIO = 0.5
     
-    # Smoothness analysis parameters
-    LOCAL_VARIATION_WINDOW_DIVISOR = 5  # window_size = min(10, len(data) // divisor)
-    BALANCE_SCORE_VARIATION_WEIGHT = 0.1  # Weight for local variation in balance score
+    LOCAL_VARIATION_WINDOW_DIVISOR = 5
+    BALANCE_SCORE_VARIATION_WEIGHT = 0.1
     
-    # === Curve Fitting Parameters ===
-    SINE_FIT_MAX_ITERATIONS = 2000  # Maximum iterations for sine curve fitting
-    SINE_FIT_SMOOTH_POINTS = 200  # Number of points for smooth curve generation
+    SINE_FIT_MAX_ITERATIONS = 2000
+    SINE_FIT_SMOOTH_POINTS = 200
     
-    # === Gene Lists ===
     CIRCADIAN_GENES = [
-        'PER1', 'PER2', 'PER3', 'CRY1', 'CRY2', 
-        'CLOCK', 'ARNTL', 'NR1D1', 'NR1D2', 'DBP'
+        'PER1', 'PER2', 'CRY1', 'CRY2', 
+        'CLOCK', 'NR1D1', 'NR1D2', 'DBP'
     ]
     
-    # === Optimization Configurations ===
     SMOOTHNESS_CONFIGS = [
         {'smoothness_factor': 1.0, 'local_variation_factor': 0.0, 'name': 'Pure Smoothness'},
         {'smoothness_factor': 0.8, 'local_variation_factor': 0.2, 'name': 'Mostly Smooth'},
@@ -56,70 +43,57 @@ class Config:
         {'smoothness_factor': 0.5, 'local_variation_factor': 0.5, 'name': 'Equal Balance'}
     ]
     
-    # === Eigengene Weights ===
-    # Weights for different eigengene components (first components get higher weight)
     @staticmethod
     def get_eigengene_weights(n_components):
         """Generate eigengene weights based on component importance"""
         if n_components <= 50:
-            # Standard weighting for up to 50 components
             weights = []
-            weights.extend([1.0])  # First component
-            weights.extend([0.8] * min(10, n_components - 1))  # Next 10 components
+            weights.extend([1.0])
+            weights.extend([0.8] * min(10, n_components - 1))
             if n_components > 11:
-                weights.extend([0.6] * min(15, n_components - 11))  # Next 15 components
+                weights.extend([0.6] * min(15, n_components - 11))
             if n_components > 26:
-                weights.extend([0.4] * (n_components - 26))  # Remaining components
+                weights.extend([0.4] * (n_components - 26))
             return weights[:n_components]
         else:
-            # Extended weighting for more components
             weights = []
-            weights.extend([1.0])  # First component
-            weights.extend([0.8] * 10)  # Next 10 components
-            weights.extend([0.6] * 15)  # Next 15 components
-            weights.extend([0.4] * 24)  # Next 24 components (total 50)
-            # Additional components get decreasing weights
+            weights.extend([1.0])
+            weights.extend([0.8] * 10)
+            weights.extend([0.6] * 15)
+            weights.extend([0.4] * 24)
             remaining = n_components - 50
             if remaining > 0:
-                weights.extend([0.2] * min(25, remaining))  # Next 25 components
+                weights.extend([0.2] * min(25, remaining))
                 if remaining > 25:
-                    weights.extend([0.1] * (remaining - 25))  # All remaining
+                    weights.extend([0.1] * (remaining - 25))
             return weights[:n_components]
     
-    # === Visualization Parameters ===
-    # Figure parameters
     FIGURE_DPI = 300
-    SUBPLOT_WIDTH_PER_GENE = 3  # Width per gene subplot
-    SUBPLOT_HEIGHT_PER_CELLTYPE = 3  # Height per cell type subplot
-    EIGENGENE_SUBPLOT_WIDTH = 4  # Width per eigengene subplot
-    EIGENGENE_SUBPLOT_HEIGHT = 3  # Height per configuration subplot
-    MAX_EIGENGENES_PLOT = 5  # Maximum number of eigengenes to plot
+    SUBPLOT_WIDTH_PER_GENE = 3
+    SUBPLOT_HEIGHT_PER_CELLTYPE = 3
+    EIGENGENE_SUBPLOT_WIDTH = 4
+    EIGENGENE_SUBPLOT_HEIGHT = 3
+    MAX_EIGENGENES_PLOT = 5
     
-    # Plot styling parameters
-    SCATTER_SIZE_MAIN = 25  # Size of scatter points in main plots
-    SCATTER_SIZE_EIGENGENE = 20  # Size of scatter points in eigengene plots
-    SCATTER_ALPHA = 0.7  # Transparency of scatter points
-    LINE_WIDTH_MAIN = 2.5  # Line width for main plots
-    LINE_WIDTH_EIGENGENE = 2.0  # Line width for eigengene plots
-    LINE_ALPHA = 0.8  # Transparency of fitted lines
-    EDGE_LINE_WIDTH_MAIN = 0.5  # Edge line width for main scatter points
-    EDGE_LINE_WIDTH_EIGENGENE = 0.3  # Edge line width for eigengene scatter points
-    GRID_ALPHA = 0.3  # Grid transparency
+    SCATTER_SIZE_MAIN = 25
+    SCATTER_SIZE_EIGENGENE = 20
+    SCATTER_ALPHA = 0.7
+    LINE_WIDTH_MAIN = 2.5
+    LINE_WIDTH_EIGENGENE = 2.0
+    LINE_ALPHA = 0.8
+    EDGE_LINE_WIDTH_MAIN = 0.5
+    EDGE_LINE_WIDTH_EIGENGENE = 0.3
+    GRID_ALPHA = 0.3
     
-    # Color settings
-    COLORMAP = 'viridis'  # Colormap for scatter plots
-    EDGE_COLOR = 'white'  # Edge color for scatter points
+    COLORMAP = 'viridis'
+    EDGE_COLOR = 'white'
     
-    # === File I/O Parameters ===
-    # Default file paths (can be overridden)
-    DEFAULT_EXPRESSION_FILE = r"d:/CriticalFile/Preprocess_CIRCADIA/CYCLOPS-python/data/Zhang_CancerCell_2025.Sample_SubCluster/expression.csv"
+    DEFAULT_EXPRESSION_FILE = "data/zeitzeiger/expression.csv"
     
-    # Output naming
     RESULT_DIR_PREFIX = "result"
     OUTPUT_FIGURE_FORMAT = "png"
     
-    # === Data Validation Parameters ===
-    INVALID_VALUE_REPLACEMENT = 0.0  # Value to replace invalid/NaN values with
+    INVALID_VALUE_REPLACEMENT = 0.0
     
     @classmethod
     def print_config(cls):
@@ -144,10 +118,6 @@ class Config:
         print(f"Configurations: {len(cls.SMOOTHNESS_CONFIGS)} optimization strategies")
         print("=" * 60)
 
-# ================================
-# END OF CONFIGURABLE PARAMETERS
-# ================================
-
 def create_eigengenes(expression_scaled, n_components=None):
     """Create eigengenes using PCA"""
     if n_components is None:
@@ -169,28 +139,23 @@ def fit_sine_curve(x_data, y_data):
     Function: y = A * sin(2*pi*x/period + phase) + offset
     """
     def sine_func(x, amplitude, phase, offset):
-        # Fixed period to span the entire data range (one complete cycle)
         period = len(x_data)
         return amplitude * np.sin(2 * np.pi * x / period + phase) + offset
     
     try:
-        # Initial parameter guesses
         amplitude_guess = (np.max(y_data) - np.min(y_data)) / 2
         offset_guess = np.mean(y_data)
         phase_guess = 0.0
         
-        # Fit the curve
         popt, _ = curve_fit(sine_func, x_data, y_data, 
                            p0=[amplitude_guess, phase_guess, offset_guess],
                            maxfev=Config.SINE_FIT_MAX_ITERATIONS)
         
         amplitude, phase, offset = popt
         
-        # Generate smooth curve for plotting
         x_smooth = np.linspace(x_data[0], x_data[-1], Config.SINE_FIT_SMOOTH_POINTS)
         y_smooth = sine_func(x_smooth, amplitude, phase, offset)
         
-        # Calculate R-squared
         y_pred = sine_func(x_data, amplitude, phase, offset)
         ss_res = np.sum((y_data - y_pred) ** 2)
         ss_tot = np.sum((y_data - np.mean(y_data)) ** 2)
@@ -200,7 +165,6 @@ def fit_sine_curve(x_data, y_data):
         
     except Exception as e:
         print(f"Warning: Sine fitting failed: {e}")
-        # Return a flat line if fitting fails
         x_smooth = np.linspace(x_data[0], x_data[-1], Config.SINE_FIT_SMOOTH_POINTS)
         y_smooth = np.full_like(x_smooth, np.mean(y_data))
         return x_smooth, y_smooth, 0.0, [0, 0, np.mean(y_data)]
@@ -208,15 +172,7 @@ def fit_sine_curve(x_data, y_data):
 def multi_scale_optimize(x, weights=None, smoothness_factor=None, local_variation_factor=None, window_size=None):
     """
     Multi-scale optimization: balance global smoothness with local variation
-    
-    Parameters:
-    x: data matrix (n_samples, n_dimensions)
-    weights: dimension weights
-    smoothness_factor: weight for global smoothness (0-1), defaults to Config.DEFAULT_SMOOTHNESS_FACTOR
-    local_variation_factor: weight for preserving local patterns (0-1), defaults to Config.DEFAULT_LOCAL_VARIATION_FACTOR
-    window_size: size of local windows for variation analysis, defaults to Config.DEFAULT_WINDOW_SIZE
     """
-    # Set default values from Config if not provided
     if smoothness_factor is None:
         smoothness_factor = Config.DEFAULT_SMOOTHNESS_FACTOR
     if local_variation_factor is None:
@@ -232,7 +188,6 @@ def multi_scale_optimize(x, weights=None, smoothness_factor=None, local_variatio
     else:
         weights = np.array(weights)
     
-    # Step 1: Global smoothness optimization (TSP-based)
     def weighted_distance(xi, xj):
         return np.sum(weights * np.abs(xi - xj))
     
@@ -241,14 +196,11 @@ def multi_scale_optimize(x, weights=None, smoothness_factor=None, local_variatio
         for j in range(n_samples):
             distance_matrix[i, j] = weighted_distance(x[i], x[j])
     
-    # Enhanced distance function considering local variation
     def enhanced_distance(xi, xj, i, j):
         base_dist = weighted_distance(xi, xj)
         
-        # Add local variation penalty - penalize too much smoothing in naturally varying regions
         local_variation_penalty = 0
         for dim in range(n_dims):
-            # Calculate local standard deviation around these points
             window_start_i = max(0, i - window_size//2)
             window_end_i = min(n_samples, i + window_size//2)
             window_start_j = max(0, j - window_size//2)
@@ -257,7 +209,6 @@ def multi_scale_optimize(x, weights=None, smoothness_factor=None, local_variatio
             local_std_i = np.std(x[window_start_i:window_end_i, dim]) if window_end_i > window_start_i + 1 else 0
             local_std_j = np.std(x[window_start_j:window_end_j, dim]) if window_end_j > window_start_j + 1 else 0
             
-            # If both regions have high variation, allow more difference
             avg_local_std = (local_std_i + local_std_j) / 2
             if avg_local_std > 0:
                 variation_tolerance = min(avg_local_std * local_variation_factor, base_dist * Config.VARIATION_TOLERANCE_RATIO)
@@ -265,13 +216,11 @@ def multi_scale_optimize(x, weights=None, smoothness_factor=None, local_variatio
         
         return base_dist + local_variation_penalty
     
-    # Build enhanced distance matrix
     enhanced_distance_matrix = np.zeros((n_samples, n_samples))
     for i in range(n_samples):
         for j in range(n_samples):
             enhanced_distance_matrix[i, j] = enhanced_distance(x[i], x[j], i, j)
     
-    # Greedy + 2-opt with enhanced distances
     def greedy_tsp_enhanced():
         visited = [False] * n_samples
         path = [0]
@@ -284,7 +233,6 @@ def multi_scale_optimize(x, weights=None, smoothness_factor=None, local_variatio
             
             for i in range(n_samples):
                 if not visited[i]:
-                    # Use combination of original and enhanced distance
                     combined_dist = (smoothness_factor * distance_matrix[current, i] + 
                                    local_variation_factor * enhanced_distance_matrix[current, i])
                     if combined_dist < min_dist:
@@ -311,7 +259,7 @@ def multi_scale_optimize(x, weights=None, smoothness_factor=None, local_variatio
         improved = True
         
         iterations = 0
-        max_iterations = min(Config.MAX_ITERATIONS_RATIO, n_samples)  # Limit iterations to prevent over-optimization
+        max_iterations = min(Config.MAX_ITERATIONS_RATIO, n_samples)
         
         while improved and iterations < max_iterations:
             improved = False
@@ -334,7 +282,6 @@ def multi_scale_optimize(x, weights=None, smoothness_factor=None, local_variatio
         
         return best_path
     
-    # Execute optimization
     initial_path = greedy_tsp_enhanced()
     optimized_path = two_opt_improve_enhanced(initial_path)
     
@@ -347,10 +294,8 @@ def analyze_smoothness_and_variation(data, ranks):
     """Analyze both global smoothness and local variation characteristics"""
     ordered_data = data[ranks.flatten()]
     
-    # Global smoothness metrics
     global_diff = np.mean(np.abs(ordered_data[1:] - ordered_data[:-1]))
     
-    # Local variation metrics
     window_size = min(Config.DEFAULT_WINDOW_SIZE, len(ordered_data) // Config.LOCAL_VARIATION_WINDOW_DIVISOR)
     local_variations = []
     
@@ -361,20 +306,19 @@ def analyze_smoothness_and_variation(data, ranks):
     
     avg_local_variation = np.mean(local_variations)
     
-    # Trend smoothness (using gradient)
     trends = []
     for dim in range(data.shape[1]):
         gradient = np.gradient(ordered_data[:, dim])
-        trend_smoothness = 1.0 / (1.0 + np.std(gradient))  # Higher = smoother trend
+        trend_smoothness = 1.0 / (1.0 + np.std(gradient))
         trends.append(trend_smoothness)
     
     avg_trend_smoothness = np.mean(trends)
     
     return {
-        'global_smoothness': 1.0 / (1.0 + global_diff),  # Higher = smoother
+        'global_smoothness': 1.0 / (1.0 + global_diff),
         'local_variation': avg_local_variation,
         'trend_smoothness': avg_trend_smoothness,
-        'balance_score': avg_trend_smoothness * (1.0 + Config.BALANCE_SCORE_VARIATION_WEIGHT * avg_local_variation)  # Good balance score
+        'balance_score': avg_trend_smoothness * (1.0 + Config.BALANCE_SCORE_VARIATION_WEIGHT * avg_local_variation)
     }
 
 def load_and_process_expression_data(expression_file, n_components=None):
@@ -387,11 +331,9 @@ def load_and_process_expression_data(expression_file, n_components=None):
     print("=== Loading Expression Data ===")
     print(f"File: {expression_file}")
     
-    # Load the data
     df = pd.read_csv(expression_file, low_memory=False)
     print(f"Data shape: {df.shape}")
     
-    # Check for metadata rows
     celltype_row = df[df['Gene_Symbol'] == 'celltype_D']
     time_row = df[df['Gene_Symbol'] == 'time_C']
     
@@ -401,12 +343,10 @@ def load_and_process_expression_data(expression_file, n_components=None):
     print(f"Contains celltype info: {has_celltype}")
     print(f"Contains time info: {has_time}")
     
-    # Get sample columns (exclude Gene_Symbol)
     sample_columns = [col for col in df.columns if col != 'Gene_Symbol']
     n_samples = len(sample_columns)
     print(f"Number of samples: {n_samples}")
     
-    # Extract metadata if available
     celltypes = None
     times = None
     
@@ -419,14 +359,11 @@ def load_and_process_expression_data(expression_file, n_components=None):
         times = time_row.iloc[0][sample_columns].values.astype(float)
         print(f"Time range: {times.min():.2f} - {times.max():.2f} hours")
     
-    # Get gene expression data (exclude metadata rows)
     gene_df = df[~df['Gene_Symbol'].isin(['celltype_D', 'time_C'])].copy()
     gene_names = gene_df['Gene_Symbol'].values
     
-    # Convert expression data to numeric, handling any non-numeric values
     expression_data_raw = gene_df[sample_columns].values
     
-    # Ensure all expression data is numeric
     print("Converting expression data to numeric...")
     expression_data = np.zeros((len(sample_columns), len(gene_names)), dtype=float)
     
@@ -436,19 +373,17 @@ def load_and_process_expression_data(expression_file, n_components=None):
                 value = float(expression_data_raw[j, i])
                 expression_data[i, j] = value
             except (ValueError, TypeError):
-                expression_data[i, j] = Config.INVALID_VALUE_REPLACEMENT  # Set invalid values to configured replacement
+                expression_data[i, j] = Config.INVALID_VALUE_REPLACEMENT
     
     print(f"Number of genes: {len(gene_names)}")
     print(f"Expression data shape: {expression_data.shape}")
     print(f"Expression data type: {expression_data.dtype}")
     print(f"Expression data range: {expression_data.min():.4f} to {expression_data.max():.4f}")
     
-    # Standardize the data
     print("Standardizing expression data...")
     scaler = StandardScaler()
     expression_scaled = scaler.fit_transform(expression_data)
     
-    # Perform PCA to get eigengenes
     print(f"Performing PCA to get {n_components} eigengenes...")
     eigengenes, pca_model, explained_variance = create_eigengenes(
         expression_scaled, n_components
@@ -478,7 +413,6 @@ def get_circadian_gene_expressions(data_info, circadian_genes):
     gene_names = data_info['gene_names']
     original_expression = data_info['original_expression']
     
-    # Find indices of circadian genes that exist in the data
     found_genes = []
     gene_expressions = []
     
@@ -487,7 +421,6 @@ def get_circadian_gene_expressions(data_info, circadian_genes):
             gene_idx = np.where(gene_names == gene)[0][0]
             gene_expr = original_expression[:, gene_idx]
             
-            # Ensure numeric data
             if gene_expr.dtype == 'object' or not np.issubdtype(gene_expr.dtype, np.number):
                 try:
                     gene_expr = pd.to_numeric(gene_expr, errors='coerce')
@@ -504,7 +437,7 @@ def get_circadian_gene_expressions(data_info, circadian_genes):
         print("Error: No circadian genes found in data!")
         return None, None
     
-    gene_expressions = np.array(gene_expressions, dtype=float).T  # samples x genes
+    gene_expressions = np.array(gene_expressions, dtype=float).T
     print(f"Found {len(found_genes)} circadian genes: {found_genes}")
     print(f"Circadian expression data shape: {gene_expressions.shape}")
     print(f"Circadian expression data type: {gene_expressions.dtype}")
@@ -561,20 +494,17 @@ def main():
         eligible_celltypes = [ct for ct in unique_celltypes if np.sum(celltypes == ct) >= 10]
         print(f"\nCell types with >=10 samples: {eligible_celltypes}")
         
-        # Further update output directory name with celltype info
         final_output_dir = f"{output_dir}_celltypes{len(eligible_celltypes)}"
         if output_dir != final_output_dir:
             os.rename(output_dir, final_output_dir)
             output_dir = final_output_dir
             print(f"Final output directory: {os.path.abspath(output_dir)}")
         
-        # Process each cell type
         all_results = {}
         
         for celltype in eligible_celltypes:
             print(f"\n=== Processing Cell Type {celltype} ===")
             
-            # Filter data for this cell type
             celltype_mask = celltypes == celltype
             celltype_eigengenes = eigengenes[celltype_mask]
             celltype_circadian = circadian_expressions[celltype_mask]
@@ -582,13 +512,11 @@ def main():
             
             print(f"Samples: {n_samples}")
             
-            # Test different optimization configurations
             celltype_results = {}
             
             for config in smoothness_configs:
                 print(f"  Testing {config['name']}...")
                 
-                # Optimize using eigengenes
                 ranks = multi_scale_optimize(
                     celltype_eigengenes, 
                     weights=eigengene_weights[:n_components],
@@ -596,7 +524,6 @@ def main():
                     local_variation_factor=config['local_variation_factor']
                 )
                 
-                # Analyze the optimization results
                 metrics = analyze_smoothness_and_variation(celltype_eigengenes, ranks)
                 
                 celltype_results[config['name']] = {
@@ -611,34 +538,27 @@ def main():
             
             all_results[celltype] = celltype_results
             
-            # Show best configuration for this cell type
             best_config = max(celltype_results.items(), key=lambda x: x[1]['metrics']['balance_score'])
             print(f"  Best config: {best_config[0]} (Score: {best_config[1]['metrics']['balance_score']:.4f})")
         
-        # Create visualizations
         print("\n=== Creating Visualizations ===")
         
-        # 1. Visualization using circadian genes (final result)
         create_circadian_gene_visualization(all_results, found_circadian_genes, eligible_celltypes, output_dir)
         
-        # 2. Eigengene optimization comparison for one representative cell type
         if len(eligible_celltypes) > 0:
             create_eigengene_comparison_visualization(all_results, eligible_celltypes[0], n_components, output_dir)
         
-        # 3. Summary statistics
         print_summary_statistics(all_results, output_dir)
         
     else:
         print("\nNo cell type information available, processing all samples together...")
         
-        # Update output directory for single dataset
         final_output_dir = f"{output_dir}_single_dataset"
         if output_dir != final_output_dir:
             os.rename(output_dir, final_output_dir)
             output_dir = final_output_dir
             print(f"Final output directory: {os.path.abspath(output_dir)}")
         
-        # Process all samples together
         results = {}
         n_samples = len(eigengenes)
         print(f"Total samples: {n_samples}")
@@ -665,8 +585,34 @@ def main():
             
             print(f"  Balance Score: {metrics['balance_score']:.4f}")
         
-        # Create visualization for single dataset
         create_single_dataset_visualization(results, found_circadian_genes, output_dir)
+    
+    # 在celltype分组情况下，输出每个sample的排序结果
+    if celltypes is not None:
+        for celltype in eligible_celltypes:
+            celltype_results = all_results[celltype]
+            for config_name, result in celltype_results.items():
+                ranks = result['ranks'].flatten()
+                sample_names = np.array(data_info['sample_columns'])[celltypes == celltype]
+                df_rank = pd.DataFrame({
+                    'Sample': sample_names,
+                    'Rank': ranks
+                })
+                rank_csv = os.path.join(output_dir, f'sample_ranks_{celltype}_{config_name.replace(" ", "_")}.csv')
+                df_rank.to_csv(rank_csv, index=False)
+                print(f"Sample ranks saved to: {rank_csv}")
+    else:
+        # 无celltype分组，输出所有样本的排序结果
+        for config_name, result in results.items():
+            ranks = result['ranks'].flatten()
+            sample_names = np.array(data_info['sample_columns'])
+            df_rank = pd.DataFrame({
+                'Sample': sample_names,
+                'Rank': ranks
+            })
+            rank_csv = os.path.join(output_dir, f'sample_ranks_{config_name.replace(" ", "_")}.csv')
+            df_rank.to_csv(rank_csv, index=False)
+            print(f"Sample ranks saved to: {rank_csv}")
 
 def create_circadian_gene_visualization(all_results, circadian_genes, celltypes, output_dir):
     """Create visualization using original circadian genes"""
@@ -685,12 +631,10 @@ def create_circadian_gene_visualization(all_results, circadian_genes, celltypes,
     colors = plt.cm.Set3(np.linspace(0, 1, n_genes))
     
     for ct_idx, celltype in enumerate(celltypes):
-        # Use balanced configuration
         result = all_results[celltype]['Balanced']
         ranks = result['ranks']
         circadian_data = result['circadian_expressions']
         
-        # Order samples according to optimization
         order_indices = np.argsort(ranks.flatten())
         ordered_circadian = circadian_data[order_indices]
         n_samples = len(ordered_circadian)
@@ -701,7 +645,6 @@ def create_circadian_gene_visualization(all_results, circadian_genes, celltypes,
             x_range = np.array(range(1, n_samples + 1))
             gene_values = ordered_circadian[:, gene_idx]
             
-            # Ensure the data is numeric
             if gene_values.dtype == 'object' or not np.issubdtype(gene_values.dtype, np.number):
                 try:
                     gene_values = pd.to_numeric(gene_values, errors='coerce')
@@ -709,12 +652,10 @@ def create_circadian_gene_visualization(all_results, circadian_genes, celltypes,
                 except:
                     gene_values = np.zeros_like(gene_values, dtype=float)
             
-            # Plot scatter points only (no connecting lines)
             scatter = ax.scatter(x_range, gene_values, 
                                c=range(n_samples), cmap='viridis', s=25, alpha=0.7, 
                                edgecolors='white', linewidth=0.5, zorder=3)
             
-            # Fit and plot sine curve
             x_smooth, y_smooth, r_squared, _ = fit_sine_curve(x_range, gene_values)
             ax.plot(x_smooth, y_smooth, '-', color=colors[gene_idx], 
                    linewidth=2.5, alpha=0.8, label=f'Sine fit (R²={r_squared:.3f})', zorder=2)
@@ -727,7 +668,6 @@ def create_circadian_gene_visualization(all_results, circadian_genes, celltypes,
             ax.grid(True, alpha=0.3, linestyle='--', zorder=1)
             ax.set_xlim(0, n_samples + 1)
             
-            # Set y-limits based on data range
             y_min, y_max = float(np.min(gene_values)), float(np.max(gene_values))
             y_range = y_max - y_min
             if y_range > 0:
@@ -735,7 +675,6 @@ def create_circadian_gene_visualization(all_results, circadian_genes, celltypes,
             else:
                 ax.set_ylim(-0.1, 0.1)
             
-            # Add legend for the first subplot
             if ct_idx == 0 and gene_idx == 0:
                 ax.legend(loc='upper right', fontsize=8)
     
@@ -756,7 +695,6 @@ def create_eigengene_comparison_visualization(all_results, representative_cellty
     
     celltype_results = all_results[representative_celltype]
     
-    # Use first 5 eigengenes for visualization
     n_eigengenes_plot = min(5, n_components)
     
     _, axes = plt.subplots(len(celltype_results), n_eigengenes_plot, 
@@ -779,7 +717,6 @@ def create_eigengene_comparison_visualization(all_results, representative_cellty
             x_range = np.array(range(1, n_samples + 1))
             eigen_values = ordered_eigengenes[:, eigen_idx]
             
-            # Ensure the data is numeric
             if eigen_values.dtype == 'object' or not np.issubdtype(eigen_values.dtype, np.number):
                 try:
                     eigen_values = pd.to_numeric(eigen_values, errors='coerce')
@@ -787,12 +724,10 @@ def create_eigengene_comparison_visualization(all_results, representative_cellty
                 except:
                     eigen_values = np.zeros_like(eigen_values, dtype=float)
             
-            # Plot scatter points only (no connecting lines)
             ax.scatter(x_range, eigen_values, 
                         c=range(n_samples), cmap='viridis', s=20, alpha=0.7, 
                         edgecolors='white', linewidth=0.3, zorder=3)
         
-            # Fit and plot sine curve
             x_smooth, y_smooth, r_squared, _ = fit_sine_curve(x_range, eigen_values)
             ax.plot(x_smooth, y_smooth, '-', color=colors[eigen_idx], 
                    linewidth=2.0, alpha=0.8, label=f'Sine fit (R²={r_squared:.3f})', zorder=2)
@@ -805,7 +740,6 @@ def create_eigengene_comparison_visualization(all_results, representative_cellty
             ax.grid(True, alpha=0.3, linestyle='--', zorder=1)
             ax.set_xlim(0, n_samples + 1)
             
-            # Set y-limits based on data range
             y_min, y_max = float(np.min(eigen_values)), float(np.max(eigen_values))
             y_range = y_max - y_min
             if y_range > 0:
@@ -813,7 +747,6 @@ def create_eigengene_comparison_visualization(all_results, representative_cellty
             else:
                 ax.set_ylim(-0.1, 0.1)
             
-            # Add legend for the first subplot
             if config_idx == 0 and eigen_idx == 0:
                 ax.legend(loc='upper right', fontsize=8)
     
@@ -859,7 +792,6 @@ def create_single_dataset_visualization(results, circadian_genes, output_dir):
             x_range = np.array(range(1, n_samples + 1))
             gene_values = ordered_circadian[:, gene_idx]
             
-            # Ensure the data is numeric
             if gene_values.dtype == 'object' or not np.issubdtype(gene_values.dtype, np.number):
                 try:
                     gene_values = pd.to_numeric(gene_values, errors='coerce')
@@ -867,12 +799,10 @@ def create_single_dataset_visualization(results, circadian_genes, output_dir):
                 except:
                     gene_values = np.zeros_like(gene_values, dtype=float)
             
-            # Plot scatter points only (no connecting lines)
             scatter = ax.scatter(x_range, gene_values, 
                                c=range(n_samples), cmap='viridis', s=25, alpha=0.7, 
                                edgecolors='white', linewidth=0.5, zorder=3)
             
-            # Fit and plot sine curve
             x_smooth, y_smooth, r_squared, _ = fit_sine_curve(x_range, gene_values)
             ax.plot(x_smooth, y_smooth, '-', color=colors[gene_idx], 
                    linewidth=2.5, alpha=0.8, label=f'Sine fit (R²={r_squared:.3f})', zorder=2)
@@ -892,7 +822,6 @@ def create_single_dataset_visualization(results, circadian_genes, output_dir):
             else:
                 ax.set_ylim(-0.1, 0.1)
             
-            # Add legend for the first subplot
             if config_idx == 0 and gene_idx == 0:
                 ax.legend(loc='upper right', fontsize=8)
     
@@ -911,7 +840,6 @@ def print_summary_statistics(all_results, output_dir):
     """Print summary statistics for all cell types and configurations"""
     print("\n=== Summary Statistics ===")
     
-    # Also save summary to a text file
     summary_file = os.path.join(output_dir, 'optimization_summary.txt')
     
     with open(summary_file, 'w') as f:
@@ -964,7 +892,6 @@ def print_summary_statistics(all_results, output_dir):
     
     print(f"\nSummary statistics saved to: {summary_file}")
     
-    # Save detailed results as CSV
     csv_file = os.path.join(output_dir, 'detailed_results.csv')
     detailed_data = []
     
