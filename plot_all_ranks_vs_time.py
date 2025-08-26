@@ -143,7 +143,6 @@ def plot_config(df: pd.DataFrame, slug: str, out_dir: str):
     df = df.dropna(subset=['Rank', 'time_mod24'])
     df['Rank'] = df['Rank'].astype(int)
 
-    # Color by cell type
     celltypes = sorted(df['Cell_Type'].fillna('NA').unique().tolist())
     n_ct = len(celltypes)
     cmap = plt.get_cmap('tab20')
@@ -154,7 +153,6 @@ def plot_config(df: pd.DataFrame, slug: str, out_dir: str):
         sub = df[df['Cell_Type'] == ct]
         plt.scatter(sub['Rank'], sub['time_mod24'], s=24, alpha=0.75, edgecolors='white', linewidths=0.4, color=colors[ct], label=ct)
 
-    # Correlations
     try:
         pr, pp = pearsonr(df['Rank'], df['time_mod24'])
         sr, sp = spearmanr(df['Rank'], df['time_mod24'])
@@ -172,7 +170,6 @@ def plot_config(df: pd.DataFrame, slug: str, out_dir: str):
                        va='top', ha='left', fontsize=9,
                        bbox=dict(boxstyle='round,pad=0.3', fc='white', ec='gray', alpha=0.8))
 
-    # Legend handling
     if n_ct <= 15:
         plt.legend(loc='best', fontsize=8, ncol=1, framealpha=0.8)
     else:
@@ -221,7 +218,6 @@ def plot_single_file(joined_df: pd.DataFrame, celltype: str, slug: str, out_dir:
     plt.figure(figsize=(7.5, 5.5))
     plt.scatter(df['Rank'], df['time_mod24'], s=28, alpha=0.8, edgecolors='white', linewidths=0.4, color='tab:blue')
 
-    # Correlations
     try:
         pr, pp = pearsonr(df['Rank'], df['time_mod24'])
         sr, sp = spearmanr(df['Rank'], df['time_mod24'])
@@ -253,16 +249,12 @@ def plot_single_file(joined_df: pd.DataFrame, celltype: str, slug: str, out_dir:
 
 
 def map_rank_to_24(rank_series: pd.Series) -> np.ndarray:
-    """Linearly map ranks to [0, 24). Preserve relative scale.
-    If all ranks equal, returns zeros.
-    """
     r = pd.to_numeric(rank_series, errors='coerce').values.astype(float)
     r = r[~np.isnan(r)] if isinstance(rank_series, pd.Series) else r
     rmin = np.nanmin(r) if r.size else 0.0
     rmax = np.nanmax(r) if r.size else 1.0
     span = max(rmax - rmin, 1e-9)
     x = (rank_series.astype(float) - rmin) / span * 24.0
-    # Clamp tiny numerical issues
     x = np.mod(x, 24.0)
     return x.values if isinstance(x, pd.Series) else x
 
@@ -274,14 +266,10 @@ class ShiftFitResult:
     r2: float
     corr: float
     n: int
-    orientation: str  # 'normal' or 'flipped'
+    orientation: str
 
 
 def compute_best_shift_no_intercept(x_base: np.ndarray, y: np.ndarray, step: float = 0.05) -> ShiftFitResult:
-    """Given x_base in [0,24) and y in [0,24), find shift s in [0,24) that maximizes
-    positive Pearson correlation between x and y. For the chosen shift, also compute
-    the zero-intercept slope a>0 and corresponding R^2 for reporting. Try both orientations.
-    """
     def eval_orientation(x_in: np.ndarray, orient_name: str) -> ShiftFitResult:
         best = ShiftFitResult(slope=np.nan, shift=np.nan, r2=-np.inf, corr=-np.inf, n=len(y), orientation=orient_name)
         if len(x_in) == 0 or len(y) == 0:
@@ -292,21 +280,18 @@ def compute_best_shift_no_intercept(x_base: np.ndarray, y: np.ndarray, step: flo
         shifts = np.arange(0.0, 24.0, step)
         for s in shifts:
             x = (x_in + s) % 24.0
-            # Pearson correlation as primary objective
             try:
                 corr = float(pearsonr(x, y)[0])
             except Exception:
                 corr = -np.inf
             if not np.isfinite(corr):
                 continue
-            # Compute zero-intercept slope and R^2 for reporting if this is current best
             if corr > best.corr:
                 xx = float(np.dot(x, x))
                 if xx <= 1e-12:
                     continue
                 a = float(np.dot(x, y) / xx)
                 if a <= 0:
-                    # Enforce positive linear relation requirement
                     continue
                 y_hat = a * x
                 sst0 = float(np.sum(y ** 2))
@@ -315,10 +300,8 @@ def compute_best_shift_no_intercept(x_base: np.ndarray, y: np.ndarray, step: flo
                 best = ShiftFitResult(slope=a, shift=s, r2=r2, corr=corr, n=len(y), orientation=orient_name)
         return best
 
-    # Evaluate normal and flipped orientation to allow wrap direction
     best_normal = eval_orientation(x_base, 'normal')
     best_flipped = eval_orientation((24.0 - x_base) % 24.0, 'flipped')
-    # Prefer the one with higher Pearson correlation; break ties by R^2
     if best_normal.corr > best_flipped.corr:
         return best_normal
     if best_flipped.corr > best_normal.corr:
@@ -328,7 +311,6 @@ def compute_best_shift_no_intercept(x_base: np.ndarray, y: np.ndarray, step: flo
 
 def plot_single_file_shifted(joined_df: pd.DataFrame, celltype: str, slug: str, out_dir: str,
                              step: float = 0.05, make_plot: bool = True) -> Tuple[str, ShiftFitResult]:
-    """Compute best zero-intercept shift fit and optionally save plot; return path (or '') and fit result."""
     df = joined_df.copy()
     df['Rank'] = pd.to_numeric(df['Rank'], errors='coerce')
     df = df.dropna(subset=['Rank', 'time_mod24'])
@@ -338,9 +320,7 @@ def plot_single_file_shifted(joined_df: pd.DataFrame, celltype: str, slug: str, 
 
     x0 = map_rank_to_24(df['Rank'])
     y = df['time_mod24'].astype(float).values
-    # Center NaNs removed already
     res = compute_best_shift_no_intercept(x0, y, step=step)
-    # Prepare shifted x according to best orientation and shift
     x_use = x0 if res.orientation == 'normal' else (24.0 - x0) % 24.0
     x_shift = (x_use + res.shift) % 24.0
 
@@ -348,10 +328,15 @@ def plot_single_file_shifted(joined_df: pd.DataFrame, celltype: str, slug: str, 
     if make_plot:
         plt.figure(figsize=(7.5, 5.5))
         plt.scatter(x_shift, y, s=28, alpha=0.85, edgecolors='white', linewidths=0.4, color='tab:blue')
+        try:
+            sr_val = float(spearmanr(x_shift, y)[0])
+        except Exception:
+            sr_val = float('nan')
 
         info = (
             f"Best shift = {res.shift:.2f} h\n"
             f"Pearson r (max) = {res.corr:.3f}\n"
+            f"Spearman ρ = {sr_val:.3f}\n"
             f"Slope (no intercept) = {res.slope:.3f}\n"
             f"R^2 (no intercept) = {res.r2:.3f}\n"
             f"N = {res.n}\n"
@@ -445,14 +430,24 @@ def main():
         _path, _ = plot_single_file_shifted(joined, celltype, slug, out_dir=shift_best_dir, step=args.shift_step, make_plot=True)
     print(f"Saved best-only shifted plots per cell type to: {shift_best_dir}")
 
-    # Save metrics table per cell type: Pearson R and R^2 (as Pearson r squared) for the best result
+    # Save metrics table per cell type: Pearson R, R^2, and Spearman R for the best result
     if best_per_celltype:
         rows = []
         for ct, info in best_per_celltype.items():
             res = info['result']
             r = float(res.corr) if np.isfinite(res.corr) else np.nan
             r2 = float(r * r) if np.isfinite(r) else np.nan
-            rows.append({'celltype': ct, 'R_spuare': r2, 'Pearson_R': r})
+            # Recompute Spearman on the shifted arrays if possible
+            try:
+                joined = info['joined']
+                x0 = map_rank_to_24(joined['Rank'])
+                y = joined['time_mod24'].astype(float).values
+                x_use = x0 if res.orientation == 'normal' else (24.0 - x0) % 24.0
+                x_shift = (x_use + res.shift) % 24.0
+                sr_val = float(spearmanr(x_shift, y)[0])
+            except Exception:
+                sr_val = float('nan')
+            rows.append({'celltype': ct, 'R_spuare': r2, 'Pearson_R': r, 'Spearman_R': sr_val})
         metrics_df = pd.DataFrame(rows)
         metrics_path = os.path.join(shift_best_dir, 'metrics.csv')
         metrics_df.to_csv(metrics_path, index=False)
