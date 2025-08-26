@@ -1,3 +1,4 @@
+import argparse
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -89,7 +90,8 @@ class Config:
     EDGE_COLOR = 'white'
     
     DEFAULT_EXPRESSION_FILE = "data/zeitzeiger/expression.csv"
-    
+    DEFAULT_METADATA_FILE = "data/zeitzeiger/metadata.csv"
+
     RESULT_DIR_PREFIX = "result"
     OUTPUT_FIGURE_FORMAT = "png"
     
@@ -444,8 +446,18 @@ def get_circadian_gene_expressions(data_info, circadian_genes):
     
     return gene_expressions, found_genes
 
-def main():
-    expression_file = Config.DEFAULT_EXPRESSION_FILE
+def main(expression_file: str = None, metadata_csv: str = None):
+    """Run eigengene optimization.
+
+    Parameters
+    - expression_file: path to expression.csv (if None uses Config.DEFAULT_EXPRESSION_FILE)
+    - metadata_csv: optional path to metadata.csv; if provided, after ranks are written
+      this function will call the rank-vs-time plotting logic (by celltype_D when available)
+    """
+    if expression_file is None:
+        expression_file = Config.DEFAULT_EXPRESSION_FILE
+    if metadata_csv is None:
+        metadata_csv = Config.DEFAULT_METADATA_FILE
     n_components = Config.N_COMPONENTS
 
     import datetime
@@ -453,9 +465,9 @@ def main():
     output_dir = f"result_{timestamp}_components{n_components}"
     os.makedirs(output_dir, exist_ok=True)
     print(f"Results will be saved to: {os.path.abspath(output_dir)}")
-    
+
     circadian_genes = ['PER1', 'PER2', 'PER3', 'CRY1', 'CRY2', 'CLOCK', 'ARNTL', 'NR1D1', 'NR1D2', 'DBP']
-    
+
     smoothness_configs = [
         {'smoothness_factor': 1.0, 'local_variation_factor': 0.0, 'name': 'Pure Smoothness'},
         {'smoothness_factor': 0.8, 'local_variation_factor': 0.2, 'name': 'Mostly Smooth'},
@@ -463,69 +475,69 @@ def main():
         {'smoothness_factor': 0.6, 'local_variation_factor': 0.4, 'name': 'More Variation'},
         {'smoothness_factor': 0.5, 'local_variation_factor': 0.5, 'name': 'Equal Balance'}
     ]
-    
+
     # Component weights (give more weight to first few eigengenes)
     eigengene_weights = [1.0] + [0.8] * 10 + [0.6] * 15 + [0.4] * 24  # Total 50 components
-    
+
     print("=== Eigengene-Based Multi-Scale Optimization ===")
-    
+
     # Load and process data
     data_info = load_and_process_expression_data(expression_file, n_components)
     eigengenes = data_info['eigengenes']
     celltypes = data_info['celltypes']
-    
+
     # Get circadian gene expressions for visualization
     circadian_expressions, found_circadian_genes = get_circadian_gene_expressions(data_info, circadian_genes)
-    
+
     if circadian_expressions is None:
         print("Cannot proceed without circadian genes")
         return
-    
+
     # Update output directory name with actual data info
     actual_output_dir = f"{output_dir}_genes{len(found_circadian_genes)}"
     if output_dir != actual_output_dir:
         os.rename(output_dir, actual_output_dir)
         output_dir = actual_output_dir
         print(f"Updated output directory to: {os.path.abspath(output_dir)}")
-    
+
     # Process by cell type if available
     if celltypes is not None:
         unique_celltypes = np.unique(celltypes)
         eligible_celltypes = [ct for ct in unique_celltypes if np.sum(celltypes == ct) >= 10]
         print(f"\nCell types with >=10 samples: {eligible_celltypes}")
-        
+
         final_output_dir = f"{output_dir}_celltypes{len(eligible_celltypes)}"
         if output_dir != final_output_dir:
             os.rename(output_dir, final_output_dir)
             output_dir = final_output_dir
             print(f"Final output directory: {os.path.abspath(output_dir)}")
-        
+
         all_results = {}
-        
+
         for celltype in eligible_celltypes:
             print(f"\n=== Processing Cell Type {celltype} ===")
-            
+
             celltype_mask = celltypes == celltype
             celltype_eigengenes = eigengenes[celltype_mask]
             celltype_circadian = circadian_expressions[celltype_mask]
             n_samples = len(celltype_eigengenes)
-            
+
             print(f"Samples: {n_samples}")
-            
+
             celltype_results = {}
-            
+
             for config in smoothness_configs:
                 print(f"  Testing {config['name']}...")
-                
+
                 ranks = multi_scale_optimize(
                     celltype_eigengenes, 
                     weights=eigengene_weights[:n_components],
                     smoothness_factor=config['smoothness_factor'],
                     local_variation_factor=config['local_variation_factor']
                 )
-                
+
                 metrics = analyze_smoothness_and_variation(celltype_eigengenes, ranks)
-                
+
                 celltype_results[config['name']] = {
                     'ranks': ranks,
                     'metrics': metrics,
@@ -533,48 +545,48 @@ def main():
                     'eigengenes': celltype_eigengenes,
                     'circadian_expressions': celltype_circadian
                 }
-                
+
                 print(f"    Balance Score: {metrics['balance_score']:.4f}")
-            
+
             all_results[celltype] = celltype_results
-            
+
             best_config = max(celltype_results.items(), key=lambda x: x[1]['metrics']['balance_score'])
             print(f"  Best config: {best_config[0]} (Score: {best_config[1]['metrics']['balance_score']:.4f})")
-        
+
         print("\n=== Creating Visualizations ===")
-        
+
         create_circadian_gene_visualization(all_results, found_circadian_genes, eligible_celltypes, output_dir)
-        
+
         if len(eligible_celltypes) > 0:
             create_eigengene_comparison_visualization(all_results, eligible_celltypes[0], n_components, output_dir)
-        
+
         print_summary_statistics(all_results, output_dir)
-        
+
     else:
         print("\nNo cell type information available, processing all samples together...")
-        
+
         final_output_dir = f"{output_dir}_single_dataset"
         if output_dir != final_output_dir:
             os.rename(output_dir, final_output_dir)
             output_dir = final_output_dir
             print(f"Final output directory: {os.path.abspath(output_dir)}")
-        
+
         results = {}
         n_samples = len(eigengenes)
         print(f"Total samples: {n_samples}")
-        
+
         for config in smoothness_configs:
             print(f"Testing {config['name']}...")
-            
+
             ranks = multi_scale_optimize(
                 eigengenes,
                 weights=eigengene_weights[:n_components],
                 smoothness_factor=config['smoothness_factor'],
                 local_variation_factor=config['local_variation_factor']
             )
-            
+
             metrics = analyze_smoothness_and_variation(eigengenes, ranks)
-            
+
             results[config['name']] = {
                 'ranks': ranks,
                 'metrics': metrics,
@@ -582,11 +594,11 @@ def main():
                 'eigengenes': eigengenes,
                 'circadian_expressions': circadian_expressions
             }
-            
+
             print(f"  Balance Score: {metrics['balance_score']:.4f}")
-        
+
         create_single_dataset_visualization(results, found_circadian_genes, output_dir)
-    
+
     # 在celltype分组情况下，输出每个sample的排序结果
     if celltypes is not None:
         for celltype in eligible_celltypes:
@@ -613,6 +625,84 @@ def main():
             rank_csv = os.path.join(output_dir, f'sample_ranks_{config_name.replace(" ", "_")}.csv')
             df_rank.to_csv(rank_csv, index=False)
             print(f"Sample ranks saved to: {rank_csv}")
+
+    # --- Optional: produce Rank vs Time plots using metadata.csv ---
+    if metadata_csv:
+        try:
+            # import the helper plotting module (reuse existing logic)
+            import plot_all_ranks_vs_time as rank_plot
+        except Exception as e:
+            print(f"Rank-plot integration skipped: cannot import plot_all_ranks_vs_time: {e}")
+            return
+
+        if not os.path.isfile(metadata_csv):
+            print(f"Provided metadata file not found: {metadata_csv}. Skipping rank-time plots.")
+            return
+
+        # find rank CSVs under the output_dir we created
+        ranks_root = os.path.abspath(output_dir)
+        files = rank_plot.find_rank_csvs(ranks_root)
+        if not files:
+            print(f"No rank files found under: {ranks_root}. Skipping rank-time plots.")
+            return
+
+        print(f"Found {len(files)} rank files for rank-vs-time plotting.")
+        meta = rank_plot.load_metadata(metadata_csv)
+
+        # per-file processing: find best-shifted per celltype and save plots/metrics
+        per_file_dir = os.path.join(ranks_root, 'rank_vs_time', 'per_file')
+        shift_best_dir = os.path.join(ranks_root, 'rank_vs_time', 'per_file_shifted_best')
+        os.makedirs(per_file_dir, exist_ok=True)
+        os.makedirs(shift_best_dir, exist_ok=True)
+
+        best_per_celltype = {}
+        for fp in files:
+            try:
+                joined, celltype, slug = rank_plot.join_single_file(fp, meta)
+            except Exception as e:
+                print(f"Skip {fp}: {e}")
+                continue
+            # compute shifted fit (no plot for non-best)
+            _, res = rank_plot.plot_single_file_shifted(joined, celltype, slug, out_dir='', step=0.05, make_plot=False)
+            key = celltype or 'ALL'
+            cur_best = best_per_celltype.get(key)
+            if (cur_best is None) or (res.corr > cur_best['result'].corr) or (
+                np.isclose(res.corr, cur_best['result'].corr) and res.r2 > cur_best['result'].r2
+            ):
+                best_per_celltype[key] = {'file': fp, 'joined': joined, 'celltype': celltype, 'slug': slug, 'result': res}
+            # also keep the original per-file unshifted plot next to per_file if desired
+            rank_plot.plot_single_file(joined, celltype, slug, per_file_dir)
+
+        # Write best-only shifted plots per cell type
+        for ct, info in best_per_celltype.items():
+            joined = info['joined']
+            celltype = info['celltype']
+            slug = info['slug']
+            _path, _ = rank_plot.plot_single_file_shifted(joined, celltype, slug, out_dir=shift_best_dir, step=0.05, make_plot=True)
+        print(f"Saved best-only shifted plots per cell type to: {shift_best_dir}")
+
+        # Save metrics table per cell type: Pearson R, R^2, and Spearman R for the best result
+        if best_per_celltype:
+            rows = []
+            for ct, info in best_per_celltype.items():
+                res = info['result']
+                r = float(res.corr) if np.isfinite(res.corr) else np.nan
+                r2 = float(r * r) if np.isfinite(r) else np.nan
+                try:
+                    joined = info['joined']
+                    x0 = rank_plot.map_rank_to_24(joined['Rank'])
+                    y = joined['time_mod24'].astype(float).values
+                    x_use = x0 if res.orientation == 'normal' else (24.0 - x0) % 24.0
+                    x_shift = (x_use + res.shift) % 24.0
+                    from scipy.stats import spearmanr
+                    sr_val = float(spearmanr(x_shift, y)[0])
+                except Exception:
+                    sr_val = float('nan')
+                rows.append({'celltype': ct, 'R_spuare': r2, 'Pearson_R': r, 'Spearman_R': sr_val})
+            metrics_df = pd.DataFrame(rows)
+            metrics_path = os.path.join(shift_best_dir, 'metrics.csv')
+            metrics_df.to_csv(metrics_path, index=False)
+            print(f"Saved metrics table: {metrics_path}")
 
 def create_circadian_gene_visualization(all_results, circadian_genes, celltypes, output_dir):
     """Create visualization using original circadian genes"""
@@ -921,4 +1011,8 @@ def print_summary_statistics(all_results, output_dir):
     print("  - detailed_results.csv: Complete numerical results")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description='Eigengene optimization with optional rank-vs-time plotting')
+    parser.add_argument('--expression', '-e', default=None, help='Path to expression.csv')
+    parser.add_argument('--metadata', '-m', default=None, help='Optional path to metadata.csv for rank-vs-time plots')
+    args = parser.parse_args()
+    main(expression_file=args.expression, metadata_csv=args.metadata)
