@@ -446,18 +446,18 @@ def get_circadian_gene_expressions(data_info, circadian_genes):
     
     return gene_expressions, found_genes
 
-def main(expression_file: str = None, metadata_csv: str = None):
+def main(expression_file: str = None, metadata_file: str = None):
     """Run eigengene optimization.
 
     Parameters
     - expression_file: path to expression.csv (if None uses Config.DEFAULT_EXPRESSION_FILE)
-    - metadata_csv: optional path to metadata.csv; if provided, after ranks are written
+    - metadata_file: optional path to metadata.csv; if provided, after ranks are written
       this function will call the rank-vs-time plotting logic (by celltype_D when available)
     """
     if expression_file is None:
         expression_file = Config.DEFAULT_EXPRESSION_FILE
-    if metadata_csv is None:
-        metadata_csv = Config.DEFAULT_METADATA_FILE
+    if metadata_file is None:
+        metadata_file = Config.DEFAULT_METADATA_FILE
     n_components = Config.N_COMPONENTS
 
     import datetime
@@ -599,35 +599,8 @@ def main(expression_file: str = None, metadata_csv: str = None):
 
         create_single_dataset_visualization(results, found_circadian_genes, output_dir)
 
-    # 在celltype分组情况下，输出每个sample的排序结果
-    if celltypes is not None:
-        for celltype in eligible_celltypes:
-            celltype_results = all_results[celltype]
-            for config_name, result in celltype_results.items():
-                ranks = result['ranks'].flatten()
-                sample_names = np.array(data_info['sample_columns'])[celltypes == celltype]
-                df_rank = pd.DataFrame({
-                    'Sample': sample_names,
-                    'Rank': ranks
-                })
-                rank_csv = os.path.join(output_dir, f'sample_ranks_{celltype}_{config_name.replace(" ", "_")}.csv')
-                df_rank.to_csv(rank_csv, index=False)
-                print(f"Sample ranks saved to: {rank_csv}")
-    else:
-        # 无celltype分组，输出所有样本的排序结果
-        for config_name, result in results.items():
-            ranks = result['ranks'].flatten()
-            sample_names = np.array(data_info['sample_columns'])
-            df_rank = pd.DataFrame({
-                'Sample': sample_names,
-                'Rank': ranks
-            })
-            rank_csv = os.path.join(output_dir, f'sample_ranks_{config_name.replace(" ", "_")}.csv')
-            df_rank.to_csv(rank_csv, index=False)
-            print(f"Sample ranks saved to: {rank_csv}")
-
     # --- Optional: produce Rank vs Time plots using metadata.csv ---
-    if metadata_csv:
+    if metadata_file:
         try:
             # import the helper plotting module (reuse existing logic)
             import plot_all_ranks_vs_time as rank_plot
@@ -635,8 +608,8 @@ def main(expression_file: str = None, metadata_csv: str = None):
             print(f"Rank-plot integration skipped: cannot import plot_all_ranks_vs_time: {e}")
             return
 
-        if not os.path.isfile(metadata_csv):
-            print(f"Provided metadata file not found: {metadata_csv}. Skipping rank-time plots.")
+        if not os.path.isfile(metadata_file):
+            print(f"Provided metadata file not found: {metadata_file}. Skipping rank-time plots.")
             return
 
         # find rank CSVs under the output_dir we created
@@ -647,12 +620,10 @@ def main(expression_file: str = None, metadata_csv: str = None):
             return
 
         print(f"Found {len(files)} rank files for rank-vs-time plotting.")
-        meta = rank_plot.load_metadata(metadata_csv)
+        meta = rank_plot.load_metadata(metadata_file)
 
         # per-file processing: find best-shifted per celltype and save plots/metrics
-        per_file_dir = os.path.join(ranks_root, 'rank_vs_time', 'per_file')
         shift_best_dir = os.path.join(ranks_root, 'rank_vs_time', 'per_file_shifted_best')
-        os.makedirs(per_file_dir, exist_ok=True)
         os.makedirs(shift_best_dir, exist_ok=True)
 
         best_per_celltype = {}
@@ -670,8 +641,6 @@ def main(expression_file: str = None, metadata_csv: str = None):
                 np.isclose(res.corr, cur_best['result'].corr) and res.r2 > cur_best['result'].r2
             ):
                 best_per_celltype[key] = {'file': fp, 'joined': joined, 'celltype': celltype, 'slug': slug, 'result': res}
-            # also keep the original per-file unshifted plot next to per_file if desired
-            rank_plot.plot_single_file(joined, celltype, slug, per_file_dir)
 
         # Write best-only shifted plots per cell type
         for ct, info in best_per_celltype.items():
@@ -1015,4 +984,4 @@ if __name__ == "__main__":
     parser.add_argument('--expression', '-e', default=None, help='Path to expression.csv')
     parser.add_argument('--metadata', '-m', default=None, help='Optional path to metadata.csv for rank-vs-time plots')
     args = parser.parse_args()
-    main(expression_file=args.expression, metadata_csv=args.metadata)
+    main(expression_file=args.expression, metadata_file=args.metadata)
