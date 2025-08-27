@@ -10,11 +10,11 @@ from scipy.optimize import curve_fit
 import sys
 import os
 import plot as rank_plot
+from optimizer import MultiScaleOptimizer, create_optimizer_configs
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'my_cyclops'))
 
 class Config:
-    """Configuration class containing all adjustable parameters"""
     
     N_COMPONENTS = 50
     MIN_SAMPLES_PER_CELLTYPE = 10
@@ -90,8 +90,8 @@ class Config:
     COLORMAP = 'viridis'
     EDGE_COLOR = 'white'
     
-    DEFAULT_EXPRESSION_FILE = "data/zeitzeiger/expression.csv"
-    DEFAULT_METADATA_FILE = "data/zeitzeiger/metadata.csv"
+    DEFAULT_EXPRESSION_FILE = "../data/zeitzeiger/expression.csv"
+    DEFAULT_METADATA_FILE = "../data/zeitzeiger/metadata.csv"
 
     RESULT_DIR_PREFIX = "result"
     OUTPUT_FIGURE_FORMAT = "png"
@@ -164,158 +164,6 @@ def fit_sine_curve(x_data, y_data):
     r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
     
     return x_smooth, y_smooth, r_squared, popt
-
-def multi_scale_optimize(x, weights=None, smoothness_factor=None, local_variation_factor=None, window_size=None):
-    """
-    Multi-scale optimization: balance global smoothness with local variation
-    """
-    if smoothness_factor is None:
-        smoothness_factor = Config.DEFAULT_SMOOTHNESS_FACTOR
-    if local_variation_factor is None:
-        local_variation_factor = Config.DEFAULT_LOCAL_VARIATION_FACTOR
-    if window_size is None:
-        window_size = Config.DEFAULT_WINDOW_SIZE
-        
-    n_samples = x.shape[0]
-    n_dims = x.shape[1]
-    
-    if weights is None:
-        weights = np.ones(n_dims)
-    else:
-        weights = np.array(weights)
-    
-    def weighted_distance(xi, xj):
-        return np.sum(weights * np.abs(xi - xj))
-    
-    distance_matrix = np.zeros((n_samples, n_samples))
-    for i in range(n_samples):
-        for j in range(n_samples):
-            distance_matrix[i, j] = weighted_distance(x[i], x[j])
-    
-    def enhanced_distance(xi, xj, i, j):
-        base_dist = weighted_distance(xi, xj)
-        
-        local_variation_penalty = 0
-        for dim in range(n_dims):
-            window_start_i = max(0, i - window_size//2)
-            window_end_i = min(n_samples, i + window_size//2)
-            window_start_j = max(0, j - window_size//2)
-            window_end_j = min(n_samples, j + window_size//2)
-            
-            local_std_i = np.std(x[window_start_i:window_end_i, dim]) if window_end_i > window_start_i + 1 else 0
-            local_std_j = np.std(x[window_start_j:window_end_j, dim]) if window_end_j > window_start_j + 1 else 0
-            
-            avg_local_std = (local_std_i + local_std_j) / 2
-            if avg_local_std > 0:
-                variation_tolerance = min(avg_local_std * local_variation_factor, base_dist * Config.VARIATION_TOLERANCE_RATIO)
-                local_variation_penalty -= variation_tolerance * weights[dim]
-        
-        return base_dist + local_variation_penalty
-    
-    enhanced_distance_matrix = np.zeros((n_samples, n_samples))
-    for i in range(n_samples):
-        for j in range(n_samples):
-            enhanced_distance_matrix[i, j] = enhanced_distance(x[i], x[j], i, j)
-    
-    def greedy_tsp_enhanced():
-        visited = [False] * n_samples
-        path = [0]
-        visited[0] = True
-        current = 0
-        
-        for _ in range(n_samples - 1):
-            min_dist = float('inf')
-            next_node = -1
-            
-            for i in range(n_samples):
-                if not visited[i]:
-                    combined_dist = (smoothness_factor * distance_matrix[current, i] + 
-                                   local_variation_factor * enhanced_distance_matrix[current, i])
-                    if combined_dist < min_dist:
-                        min_dist = combined_dist
-                        next_node = i
-            
-            if next_node != -1:
-                path.append(next_node)
-                visited[next_node] = True
-                current = next_node
-        
-        return path
-    
-    def two_opt_improve_enhanced(path):
-        def calculate_path_cost(p):
-            cost = 0
-            for i in range(len(p) - 1):
-                cost += (smoothness_factor * distance_matrix[p[i], p[i + 1]] + 
-                        local_variation_factor * enhanced_distance_matrix[p[i], p[i + 1]])
-            return cost
-        
-        best_path = path[:]
-        best_cost = calculate_path_cost(best_path)
-        improved = True
-        
-        iterations = 0
-        max_iterations = min(Config.MAX_ITERATIONS_RATIO, n_samples)
-        
-        while improved and iterations < max_iterations:
-            improved = False
-            for i in range(1, len(path) - 2):
-                for j in range(i + 1, len(path)):
-                    if j - i == 1: continue
-                    
-                    new_path = path[:i] + path[i:j][::-1] + path[j:]
-                    new_cost = calculate_path_cost(new_path)
-                    
-                    if new_cost < best_cost:
-                        best_path = new_path
-                        best_cost = new_cost
-                        improved = True
-                        path = new_path
-                        break
-                if improved:
-                    break
-            iterations += 1
-        
-        return best_path
-    
-    initial_path = greedy_tsp_enhanced()
-    optimized_path = two_opt_improve_enhanced(initial_path)
-    
-    ranks = np.zeros(n_samples, dtype=int)
-    ranks[np.array(optimized_path)] = np.arange(n_samples)
-    
-    return ranks.reshape(-1, 1)
-
-def analyze_smoothness_and_variation(data, ranks):
-    """Analyze both global smoothness and local variation characteristics"""
-    ordered_data = data[ranks.flatten()]
-    
-    global_diff = np.mean(np.abs(ordered_data[1:] - ordered_data[:-1]))
-    
-    window_size = min(Config.DEFAULT_WINDOW_SIZE, len(ordered_data) // Config.LOCAL_VARIATION_WINDOW_DIVISOR)
-    local_variations = []
-    
-    for i in range(len(ordered_data) - window_size + 1):
-        window = ordered_data[i:i+window_size]
-        local_std = np.std(window, axis=0)
-        local_variations.append(np.mean(local_std))
-    
-    avg_local_variation = np.mean(local_variations)
-    
-    trends = []
-    for dim in range(data.shape[1]):
-        gradient = np.gradient(ordered_data[:, dim])
-        trend_smoothness = 1.0 / (1.0 + np.std(gradient))
-        trends.append(trend_smoothness)
-    
-    avg_trend_smoothness = np.mean(trends)
-    
-    return {
-        'global_smoothness': 1.0 / (1.0 + global_diff),
-        'local_variation': avg_local_variation,
-        'trend_smoothness': avg_trend_smoothness,
-        'balance_score': avg_trend_smoothness * (1.0 + Config.BALANCE_SCORE_VARIATION_WEIGHT * avg_local_variation)
-    }
 
 def load_and_process_expression_data(expression_file, n_components=None):
     """
@@ -456,15 +304,9 @@ def main(expression_file: str = None, metadata_file: str = None):
 
     circadian_genes = ['PER1', 'PER2', 'PER3', 'CRY1', 'CRY2', 'CLOCK', 'ARNTL', 'NR1D1', 'NR1D2', 'DBP']
 
-    smoothness_configs = [
-        {'smoothness_factor': 1.0, 'local_variation_factor': 0.0, 'name': 'Pure Smoothness'},
-        {'smoothness_factor': 0.8, 'local_variation_factor': 0.2, 'name': 'Mostly Smooth'},
-        {'smoothness_factor': 0.7, 'local_variation_factor': 0.3, 'name': 'Balanced'},
-        {'smoothness_factor': 0.6, 'local_variation_factor': 0.4, 'name': 'More Variation'},
-        {'smoothness_factor': 0.5, 'local_variation_factor': 0.5, 'name': 'Equal Balance'}
-    ]
-
-    eigengene_weights = [1.0] + [0.8] * 10 + [0.6] * 15 + [0.4] * 24
+    # Use the new optimizer configurations
+    smoothness_configs = create_optimizer_configs()
+    eigengene_weights = Config.get_eigengene_weights(n_components)
 
     print("=== Eigengene-Based Multi-Scale Optimization ===")
 
@@ -512,14 +354,20 @@ def main(expression_file: str = None, metadata_file: str = None):
             for config in smoothness_configs:
                 print(f"  Testing {config['name']}...")
 
-                ranks = multi_scale_optimize(
-                    celltype_eigengenes, 
-                    weights=eigengene_weights[:n_components],
+                # Create optimizer with specific configuration
+                optimizer = MultiScaleOptimizer(
                     smoothness_factor=config['smoothness_factor'],
-                    local_variation_factor=config['local_variation_factor']
+                    local_variation_factor=config['local_variation_factor'],
+                    window_size=Config.DEFAULT_WINDOW_SIZE,
+                    max_iterations_ratio=Config.MAX_ITERATIONS_RATIO,
+                    variation_tolerance_ratio=Config.VARIATION_TOLERANCE_RATIO
                 )
 
-                metrics = analyze_smoothness_and_variation(celltype_eigengenes, ranks)
+                # Optimize rankings
+                ranks = optimizer.optimize(celltype_eigengenes, eigengene_weights)
+                
+                # Analyze metrics
+                metrics = optimizer.analyze_metrics(celltype_eigengenes, ranks)
 
                 celltype_results[config['name']] = {
                     'ranks': ranks,
@@ -561,14 +409,20 @@ def main(expression_file: str = None, metadata_file: str = None):
         for config in smoothness_configs:
             print(f"Testing {config['name']}...")
 
-            ranks = multi_scale_optimize(
-                eigengenes,
-                weights=eigengene_weights[:n_components],
+            # Create optimizer with specific configuration
+            optimizer = MultiScaleOptimizer(
                 smoothness_factor=config['smoothness_factor'],
-                local_variation_factor=config['local_variation_factor']
+                local_variation_factor=config['local_variation_factor'],
+                window_size=Config.DEFAULT_WINDOW_SIZE,
+                max_iterations_ratio=Config.MAX_ITERATIONS_RATIO,
+                variation_tolerance_ratio=Config.VARIATION_TOLERANCE_RATIO
             )
 
-            metrics = analyze_smoothness_and_variation(eigengenes, ranks)
+            # Optimize rankings
+            ranks = optimizer.optimize(eigengenes, eigengene_weights)
+            
+            # Analyze metrics
+            metrics = optimizer.analyze_metrics(eigengenes, ranks)
 
             results[config['name']] = {
                 'ranks': ranks,
