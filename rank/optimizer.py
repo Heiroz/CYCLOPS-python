@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Dict
 from neural_network import neural_multi_scale_optimize
 
 class MultiScaleOptimizer:
@@ -38,17 +38,14 @@ class MultiScaleOptimizer:
         
         local_variation_penalty = 0
         for dim in range(n_dims):
-            # Define local windows around samples i and j
             window_start_i = max(0, i - self.window_size//2)
             window_end_i = min(n_samples, i + self.window_size//2)
             window_start_j = max(0, j - self.window_size//2)
             window_end_j = min(n_samples, j + self.window_size//2)
             
-            # Calculate local standard deviations
             local_std_i = np.std(x[window_start_i:window_end_i, dim]) if window_end_i > window_start_i + 1 else 0
             local_std_j = np.std(x[window_start_j:window_end_j, dim]) if window_end_j > window_start_j + 1 else 0
             
-            # Apply variation tolerance
             avg_local_std = (local_std_i + local_std_j) / 2
             if avg_local_std > 0:
                 variation_tolerance = min(
@@ -60,7 +57,6 @@ class MultiScaleOptimizer:
         return base_dist + local_variation_penalty
     
     def compute_enhanced_distance_matrix(self, x: np.ndarray, weights: np.ndarray) -> np.ndarray:
-        """Compute enhanced distance matrix considering local variation"""
         n_samples = x.shape[0]
         enhanced_distance_matrix = np.zeros((n_samples, n_samples))
         
@@ -76,7 +72,7 @@ class MultiScaleOptimizer:
                                enhanced_distance_matrix: np.ndarray) -> list:
         n_samples = distance_matrix.shape[0]
         visited = [False] * n_samples
-        path = [0]  # Start from first sample
+        path = [0]
         visited[0] = True
         current = 0
         
@@ -86,7 +82,6 @@ class MultiScaleOptimizer:
             
             for i in range(n_samples):
                 if not visited[i]:
-                    # Combine smoothness and local variation factors
                     combined_dist = (
                         self.smoothness_factor * distance_matrix[current, i] + 
                         self.local_variation_factor * enhanced_distance_matrix[current, i]
@@ -105,7 +100,6 @@ class MultiScaleOptimizer:
     
     def calculate_path_cost(self, path: list, distance_matrix: np.ndarray, 
                            enhanced_distance_matrix: np.ndarray) -> float:
-        """Calculate total cost of a path"""
         cost = 0
         for i in range(len(path) - 1):
             cost += (
@@ -116,9 +110,6 @@ class MultiScaleOptimizer:
     
     def two_opt_improvement(self, path: list, distance_matrix: np.ndarray, 
                            enhanced_distance_matrix: np.ndarray) -> list:
-        """
-        Improve path using 2-opt local search
-        """
         best_path = path[:]
         best_cost = self.calculate_path_cost(best_path, distance_matrix, enhanced_distance_matrix)
         improved = True
@@ -134,7 +125,6 @@ class MultiScaleOptimizer:
                     if j - i == 1:
                         continue
                     
-                    # Create new path by reversing segment between i and j
                     new_path = path[:i] + path[i:j][::-1] + path[j:]
                     new_cost = self.calculate_path_cost(new_path, distance_matrix, enhanced_distance_matrix)
                     
@@ -173,11 +163,9 @@ class MultiScaleOptimizer:
         print("Constructing initial path...")
         initial_path = self.greedy_tsp_construction(distance_matrix, enhanced_distance_matrix)
         
-        # Improve path using 2-opt
         print("Improving path with 2-opt...")
         optimized_path = self.two_opt_improvement(initial_path, distance_matrix, enhanced_distance_matrix)
         
-        # Convert path to ranks
         ranks = np.zeros(n_samples, dtype=int)
         ranks[np.array(optimized_path)] = np.arange(n_samples)
         
@@ -187,16 +175,11 @@ class MultiScaleOptimizer:
         return neural_multi_scale_optimize(x, weights, n_epochs=50)
 
     def analyze_metrics(self, data: np.ndarray, ranks: np.ndarray) -> Dict[str, float]:
-        """
-        Analyze smoothness and variation metrics of the optimized ordering
-        """
         ordered_data = data[ranks.flatten()]
         
-        # Global smoothness: inverse of mean absolute difference
         global_diff = np.mean(np.abs(ordered_data[1:] - ordered_data[:-1]))
         global_smoothness = 1.0 / (1.0 + global_diff)
         
-        # Local variation analysis
         window_size = min(self.window_size, len(ordered_data) // 5)
         local_variations = []
         
@@ -207,7 +190,6 @@ class MultiScaleOptimizer:
         
         avg_local_variation = np.mean(local_variations)
         
-        # Trend smoothness: inverse of gradient standard deviation
         trends = []
         for dim in range(data.shape[1]):
             gradient = np.gradient(ordered_data[:, dim])
@@ -216,7 +198,6 @@ class MultiScaleOptimizer:
         
         avg_trend_smoothness = np.mean(trends)
         
-        # Balance score: combination of trend smoothness and local variation
         balance_score = avg_trend_smoothness * (1.0 + 0.1 * avg_local_variation)
         
         return {

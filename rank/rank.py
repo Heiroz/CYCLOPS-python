@@ -122,7 +122,6 @@ class Config:
         print("=" * 60)
 
 def create_eigengenes(expression_scaled, n_components=None):
-    """Create eigengenes using PCA"""
     if n_components is None:
         n_components = Config.N_COMPONENTS
         
@@ -137,10 +136,6 @@ def create_eigengenes(expression_scaled, n_components=None):
     return components_normalized, pca, explained_variance
 
 def fit_sine_curve(x_data, y_data):
-    """
-    Fit a single-period sine curve to the data
-    Function: y = A * sin(2*pi*x/period + phase) + offset
-    """
     def sine_func(x, amplitude, phase, offset):
         period = len(x_data)
         return amplitude * np.sin(2 * np.pi * x / period + phase) + offset
@@ -166,10 +161,6 @@ def fit_sine_curve(x_data, y_data):
     return x_smooth, y_smooth, r_squared, popt
 
 def load_and_process_expression_data(expression_file, n_components=None):
-    """
-    Load expression data and perform PCA to get eigengenes
-    Based on the my_cyclops approach
-    """
     if n_components is None:
         n_components = Config.N_COMPONENTS
     print("=== Loading Expression Data ===")
@@ -248,9 +239,6 @@ def load_and_process_expression_data(expression_file, n_components=None):
     }
 
 def get_circadian_gene_expressions(data_info, circadian_genes):
-    """
-    Extract expression data for specific circadian genes
-    """
     gene_names = data_info['gene_names']
     original_expression = data_info['original_expression']
     
@@ -282,216 +270,8 @@ def get_circadian_gene_expressions(data_info, circadian_genes):
     
     return gene_expressions, found_genes
 
-def main(expression_file: str = None, metadata_file: str = None):
-    """Run eigengene optimization.
-
-    Parameters
-    - expression_file: path to expression.csv (if None uses Config.DEFAULT_EXPRESSION_FILE)
-    - metadata_file: optional path to metadata.csv; if provided, after ranks are written
-      this function will call the rank-vs-time plotting logic (by celltype_D when available)
-    """
-    if expression_file is None:
-        expression_file = Config.DEFAULT_EXPRESSION_FILE
-    if metadata_file is None:
-        metadata_file = Config.DEFAULT_METADATA_FILE
-    n_components = Config.N_COMPONENTS
-
-    import datetime
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = f"result_{timestamp}_components{n_components}"
-    os.makedirs(output_dir, exist_ok=True)
-    print(f"Results will be saved to: {os.path.abspath(output_dir)}")
-
-    circadian_genes = ['PER1', 'PER2', 'PER3', 'CRY1', 'CRY2', 'CLOCK', 'ARNTL', 'NR1D1', 'NR1D2', 'DBP']
-
-    # Use the new optimizer configurations
-    smoothness_configs = create_optimizer_configs()
-    eigengene_weights = Config.get_eigengene_weights(n_components)
-
-    print("=== Eigengene-Based Multi-Scale Optimization ===")
-
-    data_info = load_and_process_expression_data(expression_file, n_components)
-    eigengenes = data_info['eigengenes']
-    celltypes = data_info['celltypes']
-
-    circadian_expressions, found_circadian_genes = get_circadian_gene_expressions(data_info, circadian_genes)
-
-    if circadian_expressions is None:
-        print("Cannot proceed without circadian genes")
-        return
-
-    actual_output_dir = f"{output_dir}_genes{len(found_circadian_genes)}"
-    if output_dir != actual_output_dir:
-        os.rename(output_dir, actual_output_dir)
-        output_dir = actual_output_dir
-        print(f"Updated output directory to: {os.path.abspath(output_dir)}")
-
-    if celltypes is not None:
-        unique_celltypes = np.unique(celltypes)
-        eligible_celltypes = [ct for ct in unique_celltypes if np.sum(celltypes == ct) >= 10]
-        print(f"\nCell types with >=10 samples: {eligible_celltypes}")
-
-        final_output_dir = f"{output_dir}_celltypes{len(eligible_celltypes)}"
-        if output_dir != final_output_dir:
-            os.rename(output_dir, final_output_dir)
-            output_dir = final_output_dir
-            print(f"Final output directory: {os.path.abspath(output_dir)}")
-
-        all_results = {}
-
-        for celltype in eligible_celltypes:
-            print(f"\n=== Processing Cell Type {celltype} ===")
-
-            celltype_mask = celltypes == celltype
-            celltype_eigengenes = eigengenes[celltype_mask]
-            celltype_circadian = circadian_expressions[celltype_mask]
-            n_samples = len(celltype_eigengenes)
-
-            print(f"Samples: {n_samples}")
-
-            celltype_results = {}
-
-            for config in smoothness_configs:
-                print(f"  Testing {config['name']}...")
-
-                # Create optimizer with specific configuration
-                optimizer = MultiScaleOptimizer(
-                    smoothness_factor=config['smoothness_factor'],
-                    local_variation_factor=config['local_variation_factor'],
-                    window_size=Config.DEFAULT_WINDOW_SIZE,
-                    max_iterations_ratio=Config.MAX_ITERATIONS_RATIO,
-                    variation_tolerance_ratio=Config.VARIATION_TOLERANCE_RATIO
-                )
-
-                # Optimize rankings
-                ranks = optimizer.optimize(celltype_eigengenes, eigengene_weights)
-                
-                # Analyze metrics
-                metrics = optimizer.analyze_metrics(celltype_eigengenes, ranks)
-
-                celltype_results[config['name']] = {
-                    'ranks': ranks,
-                    'metrics': metrics,
-                    'config': config,
-                    'eigengenes': celltype_eigengenes,
-                    'circadian_expressions': celltype_circadian
-                }
-
-                print(f"    Balance Score: {metrics['balance_score']:.4f}")
-
-            all_results[celltype] = celltype_results
-
-            best_config = max(celltype_results.items(), key=lambda x: x[1]['metrics']['balance_score'])
-            print(f"  Best config: {best_config[0]} (Score: {best_config[1]['metrics']['balance_score']:.4f})")
-
-        print("\n=== Creating Visualizations ===")
-
-        create_circadian_gene_visualization(all_results, found_circadian_genes, eligible_celltypes, output_dir)
-
-        if len(eligible_celltypes) > 0:
-            create_eigengene_comparison_visualization(all_results, eligible_celltypes[0], n_components, output_dir)
-
-        print_summary_statistics(all_results, output_dir)
-
-    else:
-        print("\nNo cell type information available, processing all samples together...")
-
-        final_output_dir = f"{output_dir}_single_dataset"
-        if output_dir != final_output_dir:
-            os.rename(output_dir, final_output_dir)
-            output_dir = final_output_dir
-            print(f"Final output directory: {os.path.abspath(output_dir)}")
-
-        results = {}
-        n_samples = len(eigengenes)
-        print(f"Total samples: {n_samples}")
-
-        for config in smoothness_configs:
-            print(f"Testing {config['name']}...")
-
-            # Create optimizer with specific configuration
-            optimizer = MultiScaleOptimizer(
-                smoothness_factor=config['smoothness_factor'],
-                local_variation_factor=config['local_variation_factor'],
-                window_size=Config.DEFAULT_WINDOW_SIZE,
-                max_iterations_ratio=Config.MAX_ITERATIONS_RATIO,
-                variation_tolerance_ratio=Config.VARIATION_TOLERANCE_RATIO
-            )
-
-            # Optimize rankings
-            ranks = optimizer.optimize(eigengenes, eigengene_weights)
-            
-            # Analyze metrics
-            metrics = optimizer.analyze_metrics(eigengenes, ranks)
-
-            results[config['name']] = {
-                'ranks': ranks,
-                'metrics': metrics,
-                'config': config,
-                'eigengenes': eigengenes,
-                'circadian_expressions': circadian_expressions
-            }
-
-            print(f"  Balance Score: {metrics['balance_score']:.4f}")
-
-        create_single_dataset_visualization(results, found_circadian_genes, output_dir)
-
-    if metadata_file:
-        if not os.path.isfile(metadata_file):
-            print(f"Provided metadata file not found: {metadata_file}. Skipping rank-time plots.")
-            return
-
-        ranks_root = os.path.abspath(output_dir)
-        files = rank_plot.find_rank_csvs(ranks_root)
-        if not files:
-            print(f"No rank files found under: {ranks_root}. Skipping rank-time plots.")
-            return
-
-        print(f"Found {len(files)} rank files for rank-vs-time plotting.")
-        meta = rank_plot.load_metadata(metadata_file)
-
-        shift_best_dir = os.path.join(ranks_root, 'rank_vs_time', 'per_file_shifted_best')
-        os.makedirs(shift_best_dir, exist_ok=True)
-
-        best_per_celltype = {}
-        for fp in files:
-            joined, celltype, slug = rank_plot.join_single_file(fp, meta)
-            _, res = rank_plot.plot_single_file_shifted(joined, celltype, slug, out_dir='', step=0.05, make_plot=False)
-            key = celltype or 'ALL'
-            cur_best = best_per_celltype.get(key)
-            if (cur_best is None) or (res.corr > cur_best['result'].corr) or (
-                np.isclose(res.corr, cur_best['result'].corr) and res.r2 > cur_best['result'].r2
-            ):
-                best_per_celltype[key] = {'file': fp, 'joined': joined, 'celltype': celltype, 'slug': slug, 'result': res}
-
-        for ct, info in best_per_celltype.items():
-            joined = info['joined']
-            celltype = info['celltype']
-            slug = info['slug']
-            _path, _ = rank_plot.plot_single_file_shifted(joined, celltype, slug, out_dir=shift_best_dir, step=0.05, make_plot=True)
-        print(f"Saved best-only shifted plots per cell type to: {shift_best_dir}")
-
-        if best_per_celltype:
-            rows = []
-            for ct, info in best_per_celltype.items():
-                res = info['result']
-                r = float(res.corr) if np.isfinite(res.corr) else np.nan
-                r2 = float(r * r) if np.isfinite(r) else np.nan
-                joined = info['joined']
-                x0 = rank_plot.map_rank_to_24(joined['Rank'])
-                y = joined['time_mod24'].astype(float).values
-                x_use = x0 if res.orientation == 'normal' else (24.0 - x0) % 24.0
-                x_shift = (x_use + res.shift) % 24.0
-                from scipy.stats import spearmanr
-                sr_val = float(spearmanr(x_shift, y)[0])
-                rows.append({'celltype': ct, 'R_spuare': r2, 'Pearson_R': r, 'Spearman_R': sr_val})
-            metrics_df = pd.DataFrame(rows)
-            metrics_path = os.path.join(shift_best_dir, 'metrics.csv')
-            metrics_df.to_csv(metrics_path, index=False)
-            print(f"Saved metrics table: {metrics_path}")
 
 def create_circadian_gene_visualization(all_results, circadian_genes, celltypes, output_dir):
-    """Create visualization using original circadian genes"""
     print("Creating circadian gene visualization...")
     
     n_celltypes = len(celltypes)
@@ -525,7 +305,7 @@ def create_circadian_gene_visualization(all_results, circadian_genes, celltypes,
                 gene_values = pd.to_numeric(gene_values, errors='coerce')
                 gene_values = np.nan_to_num(gene_values, nan=0.0)
             
-            scatter = ax.scatter(x_range, gene_values, 
+            ax.scatter(x_range, gene_values, 
                                c=range(n_samples), cmap='viridis', s=25, alpha=0.7, 
                                edgecolors='white', linewidth=0.5, zorder=3)
             
@@ -563,7 +343,6 @@ def create_circadian_gene_visualization(all_results, circadian_genes, celltypes,
     plt.close()
 
 def create_eigengene_comparison_visualization(all_results, representative_celltype, n_components, output_dir):
-    """Create comparison visualization showing different optimization strategies"""
     print(f"Creating eigengene comparison for cell type {representative_celltype}...")
     
     celltype_results = all_results[representative_celltype]
@@ -666,9 +445,9 @@ def create_single_dataset_visualization(results, circadian_genes, output_dir):
                 gene_values = pd.to_numeric(gene_values, errors='coerce')
                 gene_values = np.nan_to_num(gene_values, nan=0.0)
             
-            scatter = ax.scatter(x_range, gene_values, 
-                               c=range(n_samples), cmap='viridis', s=25, alpha=0.7, 
-                               edgecolors='white', linewidth=0.5, zorder=3)
+            ax.scatter(x_range, gene_values, 
+                    c=range(n_samples), cmap='viridis', s=25, alpha=0.7, 
+                    edgecolors='white', linewidth=0.5, zorder=3)
             
             x_smooth, y_smooth, r_squared, _ = fit_sine_curve(x_range, gene_values)
             ax.plot(x_smooth, y_smooth, '-', color=colors[gene_idx], 
@@ -704,7 +483,6 @@ def create_single_dataset_visualization(results, circadian_genes, output_dir):
     plt.close()
 
 def print_summary_statistics(all_results, output_dir):
-    """Print summary statistics for all cell types and configurations"""
     print("\n=== Summary Statistics ===")
     
     summary_file = os.path.join(output_dir, 'optimization_summary.txt')
@@ -786,6 +564,203 @@ def print_summary_statistics(all_results, output_dir):
     print("  - eigengene_optimization_comparison.png: Optimization strategy comparison")
     print("  - optimization_summary.txt: Summary statistics and recommendations")
     print("  - detailed_results.csv: Complete numerical results")
+
+
+
+def main(expression_file: str = None, metadata_file: str = None):
+    if expression_file is None:
+        expression_file = Config.DEFAULT_EXPRESSION_FILE
+    if metadata_file is None:
+        metadata_file = Config.DEFAULT_METADATA_FILE
+    n_components = Config.N_COMPONENTS
+
+    import datetime
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = f"result_{timestamp}_components{n_components}"
+    os.makedirs(output_dir, exist_ok=True)
+    print(f"Results will be saved to: {os.path.abspath(output_dir)}")
+
+    circadian_genes = ['PER1', 'PER2', 'CRY1', 'CRY2', 'CLOCK', 'ARNTL', 'NR1D1', 'NR1D2', 'DBP']
+
+    smoothness_configs = create_optimizer_configs()
+    eigengene_weights = Config.get_eigengene_weights(n_components)
+
+    print("=== Eigengene-Based Multi-Scale Optimization ===")
+
+    data_info = load_and_process_expression_data(expression_file, n_components)
+    eigengenes = data_info['eigengenes']
+    celltypes = data_info['celltypes']
+
+    circadian_expressions, found_circadian_genes = get_circadian_gene_expressions(data_info, circadian_genes)
+
+    if circadian_expressions is None:
+        print("Cannot proceed without circadian genes")
+        return
+
+    actual_output_dir = f"{output_dir}_genes{len(found_circadian_genes)}"
+    if output_dir != actual_output_dir:
+        os.rename(output_dir, actual_output_dir)
+        output_dir = actual_output_dir
+        print(f"Updated output directory to: {os.path.abspath(output_dir)}")
+
+    if celltypes is not None:
+        unique_celltypes = np.unique(celltypes)
+        eligible_celltypes = [ct for ct in unique_celltypes if np.sum(celltypes == ct) >= 10]
+        print(f"\nCell types with >=10 samples: {eligible_celltypes}")
+
+        final_output_dir = f"{output_dir}_celltypes{len(eligible_celltypes)}"
+        if output_dir != final_output_dir:
+            os.rename(output_dir, final_output_dir)
+            output_dir = final_output_dir
+            print(f"Final output directory: {os.path.abspath(output_dir)}")
+
+        all_results = {}
+
+        for celltype in eligible_celltypes:
+            print(f"\n=== Processing Cell Type {celltype} ===")
+
+            celltype_mask = celltypes == celltype
+            celltype_eigengenes = eigengenes[celltype_mask]
+            celltype_circadian = circadian_expressions[celltype_mask]
+            n_samples = len(celltype_eigengenes)
+
+            print(f"Samples: {n_samples}")
+
+            celltype_results = {}
+
+            for config in smoothness_configs:
+                print(f"  Testing {config['name']}...")
+
+                optimizer = MultiScaleOptimizer(
+                    smoothness_factor=config['smoothness_factor'],
+                    local_variation_factor=config['local_variation_factor'],
+                    window_size=Config.DEFAULT_WINDOW_SIZE,
+                    max_iterations_ratio=Config.MAX_ITERATIONS_RATIO,
+                    variation_tolerance_ratio=Config.VARIATION_TOLERANCE_RATIO
+                )
+
+                ranks = optimizer.optimize(celltype_eigengenes, eigengene_weights)
+                
+                metrics = optimizer.analyze_metrics(celltype_eigengenes, ranks)
+
+                celltype_results[config['name']] = {
+                    'ranks': ranks,
+                    'metrics': metrics,
+                    'config': config,
+                    'eigengenes': celltype_eigengenes,
+                    'circadian_expressions': celltype_circadian
+                }
+
+                print(f"    Balance Score: {metrics['balance_score']:.4f}")
+
+            all_results[celltype] = celltype_results
+
+            best_config = max(celltype_results.items(), key=lambda x: x[1]['metrics']['balance_score'])
+            print(f"  Best config: {best_config[0]} (Score: {best_config[1]['metrics']['balance_score']:.4f})")
+
+        print("\n=== Creating Visualizations ===")
+
+        create_circadian_gene_visualization(all_results, found_circadian_genes, eligible_celltypes, output_dir)
+
+        if len(eligible_celltypes) > 0:
+            create_eigengene_comparison_visualization(all_results, eligible_celltypes[0], n_components, output_dir)
+
+        print_summary_statistics(all_results, output_dir)
+
+    else:
+        print("\nNo cell type information available, processing all samples together...")
+
+        final_output_dir = f"{output_dir}_single_dataset"
+        if output_dir != final_output_dir:
+            os.rename(output_dir, final_output_dir)
+            output_dir = final_output_dir
+            print(f"Final output directory: {os.path.abspath(output_dir)}")
+
+        results = {}
+        n_samples = len(eigengenes)
+        print(f"Total samples: {n_samples}")
+
+        for config in smoothness_configs:
+            print(f"Testing {config['name']}...")
+
+            optimizer = MultiScaleOptimizer(
+                smoothness_factor=config['smoothness_factor'],
+                local_variation_factor=config['local_variation_factor'],
+                window_size=Config.DEFAULT_WINDOW_SIZE,
+                max_iterations_ratio=Config.MAX_ITERATIONS_RATIO,
+                variation_tolerance_ratio=Config.VARIATION_TOLERANCE_RATIO
+            )
+
+            ranks = optimizer.optimize(eigengenes, eigengene_weights)
+            
+            metrics = optimizer.analyze_metrics(eigengenes, ranks)
+
+            results[config['name']] = {
+                'ranks': ranks,
+                'metrics': metrics,
+                'config': config,
+                'eigengenes': eigengenes,
+                'circadian_expressions': circadian_expressions
+            }
+
+            print(f"  Balance Score: {metrics['balance_score']:.4f}")
+
+        create_single_dataset_visualization(results, found_circadian_genes, output_dir)
+
+    if metadata_file:
+        if not os.path.isfile(metadata_file):
+            print(f"Provided metadata file not found: {metadata_file}. Skipping rank-time plots.")
+            return
+
+        ranks_root = os.path.abspath(output_dir)
+        files = rank_plot.find_rank_csvs(ranks_root)
+        if not files:
+            print(f"No rank files found under: {ranks_root}. Skipping rank-time plots.")
+            return
+
+        print(f"Found {len(files)} rank files for rank-vs-time plotting.")
+        meta = rank_plot.load_metadata(metadata_file)
+
+        shift_best_dir = os.path.join(ranks_root, 'rank_vs_time', 'per_file_shifted_best')
+        os.makedirs(shift_best_dir, exist_ok=True)
+
+        best_per_celltype = {}
+        for fp in files:
+            joined, celltype, slug = rank_plot.join_single_file(fp, meta)
+            _, res = rank_plot.plot_single_file_shifted(joined, celltype, slug, out_dir='', step=0.05, make_plot=False)
+            key = celltype or 'ALL'
+            cur_best = best_per_celltype.get(key)
+            if (cur_best is None) or (res.corr > cur_best['result'].corr) or (
+                np.isclose(res.corr, cur_best['result'].corr) and res.r2 > cur_best['result'].r2
+            ):
+                best_per_celltype[key] = {'file': fp, 'joined': joined, 'celltype': celltype, 'slug': slug, 'result': res}
+
+        for ct, info in best_per_celltype.items():
+            joined = info['joined']
+            celltype = info['celltype']
+            slug = info['slug']
+            rank_plot.plot_single_file_shifted(joined, celltype, slug, out_dir=shift_best_dir, step=0.05, make_plot=True)
+        print(f"Saved best-only shifted plots per cell type to: {shift_best_dir}")
+
+        if best_per_celltype:
+            rows = []
+            for ct, info in best_per_celltype.items():
+                res = info['result']
+                r = float(res.corr) if np.isfinite(res.corr) else np.nan
+                r2 = float(r * r) if np.isfinite(r) else np.nan
+                joined = info['joined']
+                x0 = rank_plot.map_rank_to_24(joined['Rank'])
+                y = joined['time_mod24'].astype(float).values
+                x_use = x0 if res.orientation == 'normal' else (24.0 - x0) % 24.0
+                x_shift = (x_use + res.shift) % 24.0
+                from scipy.stats import spearmanr
+                sr_val = float(spearmanr(x_shift, y)[0])
+                rows.append({'celltype': ct, 'R_spuare': r2, 'Pearson_R': r, 'Spearman_R': sr_val})
+            metrics_df = pd.DataFrame(rows)
+            metrics_path = os.path.join(shift_best_dir, 'metrics.csv')
+            metrics_df.to_csv(metrics_path, index=False)
+            print(f"Saved metrics table: {metrics_path}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Eigengene optimization with optional rank-vs-time plotting')
