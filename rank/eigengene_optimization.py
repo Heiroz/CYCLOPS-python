@@ -9,7 +9,7 @@ from sklearn.preprocessing import StandardScaler
 from scipy.optimize import curve_fit
 import sys
 import os
-import rank.plot_all_ranks_vs_time as rank_plot
+import plot as rank_plot
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'my_cyclops'))
 
