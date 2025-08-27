@@ -9,6 +9,7 @@ from sklearn.preprocessing import StandardScaler
 from scipy.optimize import curve_fit
 import sys
 import os
+import rank.plot_all_ranks_vs_time as rank_plot
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'my_cyclops'))
 
@@ -144,32 +145,25 @@ def fit_sine_curve(x_data, y_data):
         period = len(x_data)
         return amplitude * np.sin(2 * np.pi * x / period + phase) + offset
     
-    try:
-        amplitude_guess = (np.max(y_data) - np.min(y_data)) / 2
-        offset_guess = np.mean(y_data)
-        phase_guess = 0.0
-        
-        popt, _ = curve_fit(sine_func, x_data, y_data, 
-                           p0=[amplitude_guess, phase_guess, offset_guess],
-                           maxfev=Config.SINE_FIT_MAX_ITERATIONS)
-        
-        amplitude, phase, offset = popt
-        
-        x_smooth = np.linspace(x_data[0], x_data[-1], Config.SINE_FIT_SMOOTH_POINTS)
-        y_smooth = sine_func(x_smooth, amplitude, phase, offset)
-        
-        y_pred = sine_func(x_data, amplitude, phase, offset)
-        ss_res = np.sum((y_data - y_pred) ** 2)
-        ss_tot = np.sum((y_data - np.mean(y_data)) ** 2)
-        r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
-        
-        return x_smooth, y_smooth, r_squared, popt
-        
-    except Exception as e:
-        print(f"Warning: Sine fitting failed: {e}")
-        x_smooth = np.linspace(x_data[0], x_data[-1], Config.SINE_FIT_SMOOTH_POINTS)
-        y_smooth = np.full_like(x_smooth, np.mean(y_data))
-        return x_smooth, y_smooth, 0.0, [0, 0, np.mean(y_data)]
+    amplitude_guess = (np.max(y_data) - np.min(y_data)) / 2
+    offset_guess = np.mean(y_data)
+    phase_guess = 0.0
+    
+    popt, _ = curve_fit(sine_func, x_data, y_data, 
+                       p0=[amplitude_guess, phase_guess, offset_guess],
+                       maxfev=Config.SINE_FIT_MAX_ITERATIONS)
+    
+    amplitude, phase, offset = popt
+    
+    x_smooth = np.linspace(x_data[0], x_data[-1], Config.SINE_FIT_SMOOTH_POINTS)
+    y_smooth = sine_func(x_smooth, amplitude, phase, offset)
+    
+    y_pred = sine_func(x_data, amplitude, phase, offset)
+    ss_res = np.sum((y_data - y_pred) ** 2)
+    ss_tot = np.sum((y_data - np.mean(y_data)) ** 2)
+    r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+    
+    return x_smooth, y_smooth, r_squared, popt
 
 def multi_scale_optimize(x, weights=None, smoothness_factor=None, local_variation_factor=None, window_size=None):
     """
@@ -371,11 +365,8 @@ def load_and_process_expression_data(expression_file, n_components=None):
     
     for i, sample in enumerate(sample_columns):
         for j, gene in enumerate(gene_names):
-            try:
-                value = float(expression_data_raw[j, i])
-                expression_data[i, j] = value
-            except (ValueError, TypeError):
-                expression_data[i, j] = Config.INVALID_VALUE_REPLACEMENT
+            value = float(expression_data_raw[j, i]) if pd.notna(expression_data_raw[j, i]) else Config.INVALID_VALUE_REPLACEMENT
+            expression_data[i, j] = value
     
     print(f"Number of genes: {len(gene_names)}")
     print(f"Expression data shape: {expression_data.shape}")
@@ -424,11 +415,8 @@ def get_circadian_gene_expressions(data_info, circadian_genes):
             gene_expr = original_expression[:, gene_idx]
             
             if gene_expr.dtype == 'object' or not np.issubdtype(gene_expr.dtype, np.number):
-                try:
-                    gene_expr = pd.to_numeric(gene_expr, errors='coerce')
-                    gene_expr = np.nan_to_num(gene_expr, nan=Config.INVALID_VALUE_REPLACEMENT)
-                except:
-                    gene_expr = np.zeros_like(gene_expr, dtype=float)
+                gene_expr = pd.to_numeric(gene_expr, errors='coerce')
+                gene_expr = np.nan_to_num(gene_expr, nan=Config.INVALID_VALUE_REPLACEMENT)
             
             gene_expressions.append(gene_expr)
             found_genes.append(gene)
@@ -476,31 +464,26 @@ def main(expression_file: str = None, metadata_file: str = None):
         {'smoothness_factor': 0.5, 'local_variation_factor': 0.5, 'name': 'Equal Balance'}
     ]
 
-    # Component weights (give more weight to first few eigengenes)
-    eigengene_weights = [1.0] + [0.8] * 10 + [0.6] * 15 + [0.4] * 24  # Total 50 components
+    eigengene_weights = [1.0] + [0.8] * 10 + [0.6] * 15 + [0.4] * 24
 
     print("=== Eigengene-Based Multi-Scale Optimization ===")
 
-    # Load and process data
     data_info = load_and_process_expression_data(expression_file, n_components)
     eigengenes = data_info['eigengenes']
     celltypes = data_info['celltypes']
 
-    # Get circadian gene expressions for visualization
     circadian_expressions, found_circadian_genes = get_circadian_gene_expressions(data_info, circadian_genes)
 
     if circadian_expressions is None:
         print("Cannot proceed without circadian genes")
         return
 
-    # Update output directory name with actual data info
     actual_output_dir = f"{output_dir}_genes{len(found_circadian_genes)}"
     if output_dir != actual_output_dir:
         os.rename(output_dir, actual_output_dir)
         output_dir = actual_output_dir
         print(f"Updated output directory to: {os.path.abspath(output_dir)}")
 
-    # Process by cell type if available
     if celltypes is not None:
         unique_celltypes = np.unique(celltypes)
         eligible_celltypes = [ct for ct in unique_celltypes if np.sum(celltypes == ct) >= 10]
@@ -599,20 +582,11 @@ def main(expression_file: str = None, metadata_file: str = None):
 
         create_single_dataset_visualization(results, found_circadian_genes, output_dir)
 
-    # --- Optional: produce Rank vs Time plots using metadata.csv ---
     if metadata_file:
-        try:
-            # import the helper plotting module (reuse existing logic)
-            import plot_all_ranks_vs_time as rank_plot
-        except Exception as e:
-            print(f"Rank-plot integration skipped: cannot import plot_all_ranks_vs_time: {e}")
-            return
-
         if not os.path.isfile(metadata_file):
             print(f"Provided metadata file not found: {metadata_file}. Skipping rank-time plots.")
             return
 
-        # find rank CSVs under the output_dir we created
         ranks_root = os.path.abspath(output_dir)
         files = rank_plot.find_rank_csvs(ranks_root)
         if not files:
@@ -622,18 +596,12 @@ def main(expression_file: str = None, metadata_file: str = None):
         print(f"Found {len(files)} rank files for rank-vs-time plotting.")
         meta = rank_plot.load_metadata(metadata_file)
 
-        # per-file processing: find best-shifted per celltype and save plots/metrics
         shift_best_dir = os.path.join(ranks_root, 'rank_vs_time', 'per_file_shifted_best')
         os.makedirs(shift_best_dir, exist_ok=True)
 
         best_per_celltype = {}
         for fp in files:
-            try:
-                joined, celltype, slug = rank_plot.join_single_file(fp, meta)
-            except Exception as e:
-                print(f"Skip {fp}: {e}")
-                continue
-            # compute shifted fit (no plot for non-best)
+            joined, celltype, slug = rank_plot.join_single_file(fp, meta)
             _, res = rank_plot.plot_single_file_shifted(joined, celltype, slug, out_dir='', step=0.05, make_plot=False)
             key = celltype or 'ALL'
             cur_best = best_per_celltype.get(key)
@@ -642,7 +610,6 @@ def main(expression_file: str = None, metadata_file: str = None):
             ):
                 best_per_celltype[key] = {'file': fp, 'joined': joined, 'celltype': celltype, 'slug': slug, 'result': res}
 
-        # Write best-only shifted plots per cell type
         for ct, info in best_per_celltype.items():
             joined = info['joined']
             celltype = info['celltype']
@@ -650,23 +617,19 @@ def main(expression_file: str = None, metadata_file: str = None):
             _path, _ = rank_plot.plot_single_file_shifted(joined, celltype, slug, out_dir=shift_best_dir, step=0.05, make_plot=True)
         print(f"Saved best-only shifted plots per cell type to: {shift_best_dir}")
 
-        # Save metrics table per cell type: Pearson R, R^2, and Spearman R for the best result
         if best_per_celltype:
             rows = []
             for ct, info in best_per_celltype.items():
                 res = info['result']
                 r = float(res.corr) if np.isfinite(res.corr) else np.nan
                 r2 = float(r * r) if np.isfinite(r) else np.nan
-                try:
-                    joined = info['joined']
-                    x0 = rank_plot.map_rank_to_24(joined['Rank'])
-                    y = joined['time_mod24'].astype(float).values
-                    x_use = x0 if res.orientation == 'normal' else (24.0 - x0) % 24.0
-                    x_shift = (x_use + res.shift) % 24.0
-                    from scipy.stats import spearmanr
-                    sr_val = float(spearmanr(x_shift, y)[0])
-                except Exception:
-                    sr_val = float('nan')
+                joined = info['joined']
+                x0 = rank_plot.map_rank_to_24(joined['Rank'])
+                y = joined['time_mod24'].astype(float).values
+                x_use = x0 if res.orientation == 'normal' else (24.0 - x0) % 24.0
+                x_shift = (x_use + res.shift) % 24.0
+                from scipy.stats import spearmanr
+                sr_val = float(spearmanr(x_shift, y)[0])
                 rows.append({'celltype': ct, 'R_spuare': r2, 'Pearson_R': r, 'Spearman_R': sr_val})
             metrics_df = pd.DataFrame(rows)
             metrics_path = os.path.join(shift_best_dir, 'metrics.csv')
@@ -705,11 +668,8 @@ def create_circadian_gene_visualization(all_results, circadian_genes, celltypes,
             gene_values = ordered_circadian[:, gene_idx]
             
             if gene_values.dtype == 'object' or not np.issubdtype(gene_values.dtype, np.number):
-                try:
-                    gene_values = pd.to_numeric(gene_values, errors='coerce')
-                    gene_values = np.nan_to_num(gene_values, nan=0.0)
-                except:
-                    gene_values = np.zeros_like(gene_values, dtype=float)
+                gene_values = pd.to_numeric(gene_values, errors='coerce')
+                gene_values = np.nan_to_num(gene_values, nan=0.0)
             
             scatter = ax.scatter(x_range, gene_values, 
                                c=range(n_samples), cmap='viridis', s=25, alpha=0.7, 
@@ -777,11 +737,8 @@ def create_eigengene_comparison_visualization(all_results, representative_cellty
             eigen_values = ordered_eigengenes[:, eigen_idx]
             
             if eigen_values.dtype == 'object' or not np.issubdtype(eigen_values.dtype, np.number):
-                try:
-                    eigen_values = pd.to_numeric(eigen_values, errors='coerce')
-                    eigen_values = np.nan_to_num(eigen_values, nan=0.0)
-                except:
-                    eigen_values = np.zeros_like(eigen_values, dtype=float)
+                eigen_values = pd.to_numeric(eigen_values, errors='coerce')
+                eigen_values = np.nan_to_num(eigen_values, nan=0.0)
             
             ax.scatter(x_range, eigen_values, 
                         c=range(n_samples), cmap='viridis', s=20, alpha=0.7, 
@@ -852,11 +809,8 @@ def create_single_dataset_visualization(results, circadian_genes, output_dir):
             gene_values = ordered_circadian[:, gene_idx]
             
             if gene_values.dtype == 'object' or not np.issubdtype(gene_values.dtype, np.number):
-                try:
-                    gene_values = pd.to_numeric(gene_values, errors='coerce')
-                    gene_values = np.nan_to_num(gene_values, nan=0.0)
-                except:
-                    gene_values = np.zeros_like(gene_values, dtype=float)
+                gene_values = pd.to_numeric(gene_values, errors='coerce')
+                gene_values = np.nan_to_num(gene_values, nan=0.0)
             
             scatter = ax.scatter(x_range, gene_values, 
                                c=range(n_samples), cmap='viridis', s=25, alpha=0.7, 
