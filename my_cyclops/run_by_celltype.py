@@ -296,7 +296,7 @@ def main():
                 if len(combined_metrics) > 0:
                     avg_pearson = combined_metrics['Pearson_R'].mean()
                     avg_r2 = combined_metrics['R_spuare'].mean()
-                    avg_spearman = combined_metrics['Spearman_rho'].mean()
+                    avg_spearman = combined_metrics['Spearman_R'].mean()
                     print(f"\n平均指标:")
                     print(f"  Pearson R: {avg_pearson:.3f}")
                     print(f"  R²: {avg_r2:.3f}")
@@ -305,12 +305,12 @@ def main():
                     # 找出表现最好的细胞类型
                     best_pearson = combined_metrics.loc[combined_metrics['Pearson_R'].idxmax()]
                     best_r2 = combined_metrics.loc[combined_metrics['R_spuare'].idxmax()]
-                    best_spearman = combined_metrics.loc[combined_metrics['Spearman_rho'].idxmax()]
+                    best_spearman = combined_metrics.loc[combined_metrics['Spearman_R'].idxmax()]
                     
                     print(f"\n表现最佳的细胞类型:")
                     print(f"  Pearson R: {best_pearson['celltype']} ({best_pearson['Pearson_R']:.3f})")
                     print(f"  R²: {best_r2['celltype']} ({best_r2['R_spuare']:.3f})")
-                    print(f"  Spearman ρ: {best_spearman['celltype']} ({best_spearman['Spearman_rho']:.3f})")
+                    print(f"  Spearman ρ: {best_spearman['celltype']} ({best_spearman['Spearman_R']:.3f})")
 
     if not args.keep_splits:
         try:

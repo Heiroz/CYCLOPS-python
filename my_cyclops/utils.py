@@ -711,7 +711,7 @@ def best_align_phase_for_comparison(x_hours: np.ndarray, y_hours: np.ndarray, st
         'aligned': x_hours,
         'r': np.nan,
         'r2': np.nan,
-        'spearman_rho': np.nan,
+        'spearman_R': np.nan,
         'shift': 0.0,
         'flipped': False,
     }
@@ -731,20 +731,20 @@ def best_align_phase_for_comparison(x_hours: np.ndarray, y_hours: np.ndarray, st
                 best_r = r
                 # Calculate Spearman correlation for the best alignment
                 try:
-                    spearman_rho = float(spearmanr(xs, y_hours)[0])
+                    spearman_R = float(spearmanr(xs, y_hours)[0])
                 except Exception:
-                    spearman_rho = np.nan
+                    spearman_R = np.nan
                 
                 best.update(
                     aligned=xs, 
                     r=r, 
                     r2=r*r, 
-                    spearman_rho=spearman_rho,
+                    spearman_R=spearman_R,
                     shift=float(s), 
                     flipped=flipped
                 )
 
-    return best['aligned'], best['r'], best['r2'], best['spearman_rho'], best['shift'], best['flipped']
+    return best['aligned'], best['r'], best['r2'], best['spearman_R'], best['shift'], best['flipped']
 
 
 def plot_phase_vs_metadata_comparison(pred_csv: str, celltype: str, meta: pd.DataFrame, out_dir: str):
@@ -768,7 +768,7 @@ def plot_phase_vs_metadata_comparison(pred_csv: str, celltype: str, meta: pd.Dat
         y = joined['time_mod24'].astype(float).values
         
         # Force alignment by cyclic shift and optional flip to maximize Pearson r
-        x_aligned, r, r2, spearman_rho, best_shift, flipped = best_align_phase_for_comparison(x_raw, y, step=0.1)
+        x_aligned, r, r2, spearman_R, best_shift, flipped = best_align_phase_for_comparison(x_raw, y, step=0.1)
 
         plt.figure(figsize=(7.5, 5.5))
         plt.scatter(x_aligned, y, s=28, alpha=0.85, edgecolors='white', linewidths=0.4, color='tab:blue')
@@ -778,7 +778,7 @@ def plot_phase_vs_metadata_comparison(pred_csv: str, celltype: str, meta: pd.Dat
         
         info = (
             f"Pearson r = {r:.3f}\nR^2 = {r2:.3f}\n"
-            f"Spearman ρ = {spearman_rho:.3f}\n"
+            f"Spearman ρ = {spearman_R:.3f}\n"
             f"Shift = {best_shift:.2f} h\nFlip = {'Yes' if flipped else 'No'}\nN = {len(x_aligned)}"
         )
         plt.gca().text(0.02, 0.98, info, transform=plt.gca().transAxes,
@@ -795,7 +795,7 @@ def plot_phase_vs_metadata_comparison(pred_csv: str, celltype: str, meta: pd.Dat
         plt.savefig(out_path, dpi=300, bbox_inches='tight')
         plt.close()
         print(f'Saved: {out_path}')
-        return out_path, r, r2, spearman_rho
+        return out_path, r, r2, spearman_R
         
     except Exception as e:
         print(f"[ERROR] Failed to plot phase vs metadata for {celltype}: {e}")
@@ -830,10 +830,10 @@ def generate_phase_metadata_comparison(results_df: pd.DataFrame, metadata_csv: s
                     print(f"处理整体数据: {preds_simple}")
                     result = plot_phase_vs_metadata_comparison(preds_simple, 'ALL', meta, out_dir)
                     if result:
-                        _, r, r2, spearman_rho = result
-                        print(f"整体 phase-vs-metadata 图已生成: R={r:.3f}, R²={r2:.3f}, Spearman ρ={spearman_rho:.3f}")
+                        _, r, r2, spearman_R = result
+                        print(f"整体 phase-vs-metadata 图已生成: R={r:.3f}, R²={r2:.3f}, Spearman ρ={spearman_R:.3f}")
                         # 可选：将整体结果也加入 metrics
-                        # metrics_rows.append({'celltype': 'ALL', 'R_spuare': r2, 'Pearson_R': r, 'Spearman_rho': spearman_rho})
+                        # metrics_rows.append({'celltype': 'ALL', 'R_spuare': r2, 'Pearson_R': r, 'Spearman_R': spearman_R})
             except Exception as e:
                 print(f"[WARN] 为整体生成 phase-vs-metadata 图失败: {e}")
             
@@ -849,9 +849,9 @@ def generate_phase_metadata_comparison(results_df: pd.DataFrame, metadata_csv: s
                     
                     result = plot_phase_vs_metadata_comparison(tmp_path, ct, meta, out_dir)
                     if result is not None:
-                        _, r, r2, spearman_rho = result
-                        metrics_rows.append({'celltype': ct, 'R_spuare': r2, 'Pearson_R': r, 'Spearman_rho': spearman_rho})
-                        print(f"  {ct}: R={r:.3f}, R²={r2:.3f}, Spearman ρ={spearman_rho:.3f}")
+                        _, r, r2, spearman_R = result
+                        metrics_rows.append({'celltype': ct, 'R_spuare': r2, 'Pearson_R': r, 'Spearman_R': spearman_R})
+                        print(f"  {ct}: R={r:.3f}, R²={r2:.3f}, Spearman ρ={spearman_R:.3f}")
                     else:
                         print(f"  {ct}: 匹配失败")
                         
@@ -887,9 +887,9 @@ def generate_phase_metadata_comparison(results_df: pd.DataFrame, metadata_csv: s
                     print(f"处理数据: {preds_simple} (作为 {celltype_name})")
                     result = plot_phase_vs_metadata_comparison(preds_simple, celltype_name, meta, out_dir)
                     if result is not None:
-                        _, r, r2, spearman_rho = result
-                        metrics_rows.append({'celltype': celltype_name, 'R_spuare': r2, 'Pearson_R': r, 'Spearman_rho': spearman_rho})
-                        print(f"{celltype_name}: R={r:.3f}, R²={r2:.3f}, Spearman ρ={spearman_rho:.3f}")
+                        _, r, r2, spearman_R = result
+                        metrics_rows.append({'celltype': celltype_name, 'R_spuare': r2, 'Pearson_R': r, 'Spearman_R': spearman_R})
+                        print(f"{celltype_name}: R={r:.3f}, R²={r2:.3f}, Spearman ρ={spearman_R:.3f}")
                     else:
                         print(f"{celltype_name}: 匹配失败")
                 else:
@@ -920,7 +920,7 @@ def generate_phase_metadata_comparison(results_df: pd.DataFrame, metadata_csv: s
                 # 打印简要统计
                 print(f"各细胞类型统计:")
                 for _, row in metrics_df.iterrows():
-                    print(f"  {row['celltype']}: R={row['Pearson_R']:.3f}, R²={row['R_spuare']:.3f}, Spearman ρ={row['Spearman_rho']:.3f}")
+                    print(f"  {row['celltype']}: R={row['Pearson_R']:.3f}, R²={row['R_spuare']:.3f}, Spearman ρ={row['Spearman_R']:.3f}")
                     
             except Exception as e:
                 print(f"[ERROR] 保存 metrics.csv 失败: {e}")
