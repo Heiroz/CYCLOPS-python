@@ -1,40 +1,27 @@
 import numpy as np
 from typing import Optional, Tuple, Dict, Any
+from neural_network import neural_multi_scale_optimize
 
 class MultiScaleOptimizer:
-    """
-    Multi-scale optimization for sample ranking
-    Balances global smoothness with local variation preservation
-    """
     
     def __init__(self, 
                  smoothness_factor: float = 0.7,
                  local_variation_factor: float = 0.3,
                  window_size: int = 10,
                  max_iterations_ratio: int = 50,
-                 variation_tolerance_ratio: float = 0.5):
-        """
-        Initialize the optimizer with configuration parameters
-        
-        Parameters:
-        - smoothness_factor: Weight for global smoothness (0-1)
-        - local_variation_factor: Weight for local variation preservation (0-1)
-        - window_size: Size of local window for variation analysis
-        - max_iterations_ratio: Maximum iterations for 2-opt improvement
-        - variation_tolerance_ratio: Tolerance ratio for local variation
-        """
+                 variation_tolerance_ratio: float = 0.5,
+                 method: str = 'greedy'):
         self.smoothness_factor = smoothness_factor
         self.local_variation_factor = local_variation_factor
         self.window_size = window_size
         self.max_iterations_ratio = max_iterations_ratio
         self.variation_tolerance_ratio = variation_tolerance_ratio
+        self.method = method
     
     def weighted_distance(self, xi: np.ndarray, xj: np.ndarray, weights: np.ndarray) -> float:
-        """Calculate weighted distance between two samples"""
         return np.sum(weights * np.abs(xi - xj))
     
     def compute_distance_matrix(self, x: np.ndarray, weights: np.ndarray) -> np.ndarray:
-        """Compute pairwise distance matrix"""
         n_samples = x.shape[0]
         distance_matrix = np.zeros((n_samples, n_samples))
         
@@ -46,9 +33,6 @@ class MultiScaleOptimizer:
     
     def enhanced_distance(self, xi: np.ndarray, xj: np.ndarray, 
                          i: int, j: int, x: np.ndarray, weights: np.ndarray) -> float:
-        """
-        Calculate enhanced distance considering local variation
-        """
         base_dist = self.weighted_distance(xi, xj, weights)
         n_samples, n_dims = x.shape
         
@@ -90,9 +74,6 @@ class MultiScaleOptimizer:
     
     def greedy_tsp_construction(self, distance_matrix: np.ndarray, 
                                enhanced_distance_matrix: np.ndarray) -> list:
-        """
-        Construct initial path using greedy TSP heuristic
-        """
         n_samples = distance_matrix.shape[0]
         visited = [False] * n_samples
         path = [0]  # Start from first sample
@@ -172,30 +153,23 @@ class MultiScaleOptimizer:
         return best_path
     
     def optimize(self, x: np.ndarray, weights: Optional[np.ndarray] = None) -> np.ndarray:
-        """
-        Main optimization function
-        
-        Parameters:
-        - x: Input data matrix (n_samples, n_features)
-        - weights: Feature weights (optional)
-        
-        Returns:
-        - ranks: Optimized ranking of samples
-        """
+        if self.method == 'neural':
+            return self._neural_optimize(x, weights)
+        else:
+            return self._greedy_optimize(x, weights)
+    
+    def _greedy_optimize(self, x: np.ndarray, weights: Optional[np.ndarray] = None) -> np.ndarray:
         n_samples, n_dims = x.shape
         
-        # Set default weights if not provided
         if weights is None:
             weights = np.ones(n_dims)
         else:
             weights = np.array(weights)
         
-        # Compute distance matrices
         print("Computing distance matrices...")
         distance_matrix = self.compute_distance_matrix(x, weights)
         enhanced_distance_matrix = self.compute_enhanced_distance_matrix(x, weights)
         
-        # Construct initial path using greedy TSP
         print("Constructing initial path...")
         initial_path = self.greedy_tsp_construction(distance_matrix, enhanced_distance_matrix)
         
@@ -209,6 +183,9 @@ class MultiScaleOptimizer:
         
         return ranks.reshape(-1, 1)
     
+    def _neural_optimize(self, x: np.ndarray, weights: Optional[np.ndarray] = None) -> np.ndarray:
+        return neural_multi_scale_optimize(x, weights, n_epochs=50)
+
     def analyze_metrics(self, data: np.ndarray, ranks: np.ndarray) -> Dict[str, float]:
         """
         Analyze smoothness and variation metrics of the optimized ordering
@@ -258,27 +235,32 @@ def create_optimizer_configs() -> list:
         {
             'name': 'Pure Smoothness',
             'smoothness_factor': 1.0,
-            'local_variation_factor': 0.0
+            'local_variation_factor': 0.0,
+            'method': 'greedy'
         },
         {
             'name': 'Mostly Smooth',
             'smoothness_factor': 0.8,
-            'local_variation_factor': 0.2
+            'local_variation_factor': 0.2,
+            'method': 'greedy'
         },
         {
             'name': 'Balanced',
             'smoothness_factor': 0.7,
-            'local_variation_factor': 0.3
+            'local_variation_factor': 0.3,
+            'method': 'greedy'
         },
         {
             'name': 'More Variation',
             'smoothness_factor': 0.6,
-            'local_variation_factor': 0.4
+            'local_variation_factor': 0.4,
+            'method': 'greedy'
         },
         {
-            'name': 'Equal Balance',
-            'smoothness_factor': 0.5,
-            'local_variation_factor': 0.5
+            'name': 'Neural Balanced',  # 新增神经网络配置
+            'smoothness_factor': 0.7,
+            'local_variation_factor': 0.3,
+            'method': 'neural'
         }
     ]
     
