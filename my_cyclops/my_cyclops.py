@@ -173,6 +173,7 @@ def main():
     parser.add_argument("--n_genes_plot", type=int, default=10)
     parser.add_argument("--custom_genes", nargs='*', default=None, required=True)
     parser.add_argument("--sine_predictor_hidden", type=int, default=64)
+    parser.add_argument("--metadata", default=None)
 
     args = parser.parse_args()
     
@@ -260,6 +261,13 @@ def main():
             device=args.device,
             save_dir=args.save_dir
         )
+
+        if getattr(args, 'metadata', None):
+            if os.path.isfile(args.metadata):
+                from utils import generate_phase_metadata_comparison
+                generate_phase_metadata_comparison(results_df, args.metadata, args.save_dir)
+            else:
+                print(f"[WARN] 指定的 metadata 文件不存在: {args.metadata}")
 
         print(f"\n=== 绘制Eigengenes 2D关系图（相位渐变色）===")
         predicted_phases = results_df['Predicted_Phase_Radians'].values
