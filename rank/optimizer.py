@@ -1,6 +1,6 @@
 import numpy as np
 from typing import Optional, Dict
-from nn_DL import neural_multi_scale_optimize
+from nn_RL import neural_multi_scale_optimize
 
 class MultiScaleOptimizer:
     

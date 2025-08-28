@@ -7,8 +7,6 @@ from typing import Optional, Tuple, Dict, List
 import math
 
 class AttentionLayer(nn.Module):
-    """Attention mechanism for TSP solving"""
-    
     def __init__(self, embed_dim: int, n_heads: int = 8):
         super(AttentionLayer, self).__init__()
         self.embed_dim = embed_dim
@@ -24,13 +22,10 @@ class AttentionLayer(nn.Module):
         
     def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         batch_size, seq_len, embed_dim = x.shape
-        
-        # Linear transformations and reshape for multi-head attention
         Q = self.query(x).view(batch_size, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
         K = self.key(x).view(batch_size, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
         V = self.value(x).view(batch_size, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
         
-        # Attention scores
         scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.head_dim)
         
         if mask is not None:
@@ -38,18 +33,14 @@ class AttentionLayer(nn.Module):
         
         attention_weights = F.softmax(scores, dim=-1)
         
-        # Apply attention to values
         context = torch.matmul(attention_weights, V)
         
-        # Concatenate heads and put through final linear layer
         context = context.transpose(1, 2).contiguous().view(batch_size, seq_len, embed_dim)
         output = self.out(context)
         
         return output, attention_weights
 
-class PointerNetwork(nn.Module):
-    """Pointer Network for sequence-to-sequence problems like TSP"""
-    
+class PointerNetwork(nn.Module):    
     def __init__(self, input_dim: int, hidden_dim: int = 128, n_layers: int = 3, n_heads: int = 8):
         super(PointerNetwork, self).__init__()
         
@@ -148,7 +139,6 @@ class NeuralTSPOptimizer:
     def __init__(self, input_dim: int, hidden_dim: int = 128, learning_rate: float = 1e-4, device: str = 'cuda'):
         self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
         self.input_dim = input_dim
-        
         self.network = PointerNetwork(input_dim, hidden_dim).to(self.device)
         self.optimizer = optim.Adam(self.network.parameters(), lr=learning_rate)
         
@@ -223,10 +213,10 @@ class NeuralTSPOptimizer:
     def optimize(self, x: np.ndarray, weights: Optional[np.ndarray] = None, 
                  n_epochs: int = 100, batch_size: int = 32) -> np.ndarray:
         x_tensor = torch.FloatTensor(x).to(self.device)
-        if weights is not None:
-            weights_tensor = torch.FloatTensor(weights).to(self.device)
-        else:
-            weights_tensor = None
+        n_samples, n_features = x.shape
+        if weights is None:
+            weights = np.ones(n_features, dtype=float)
+        weights_tensor = torch.FloatTensor(np.array(weights, dtype=float)).to(self.device)
         
         n_samples, n_features = x.shape
         
@@ -267,5 +257,5 @@ def neural_multi_scale_optimize(x: np.ndarray,
         hidden_dim=hidden_dim,
         learning_rate=learning_rate
     )
-    
+
     return optimizer.optimize(x, weights, n_epochs=n_epochs)

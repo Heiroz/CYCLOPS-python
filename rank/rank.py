@@ -23,7 +23,7 @@ class Config:
     DEFAULT_LOCAL_VARIATION_FACTOR = 0.3
     DEFAULT_WINDOW_SIZE = 10
     
-    MAX_ITERATIONS_RATIO = 50
+    MAX_ITERATIONS_RATIO = 5
     VARIATION_TOLERANCE_RATIO = 0.5
     
     LOCAL_VARIATION_WINDOW_DIVISOR = 5
@@ -32,7 +32,8 @@ class Config:
     SINE_FIT_MAX_ITERATIONS = 2000
     SINE_FIT_SMOOTH_POINTS = 200
     
-    METHOD = "neural"
+    # METHOD = "neural"
+    METHOD = "greedy"
     CIRCADIAN_GENES = [
         'PER1', 'PER2', 'CRY1', 'CRY2', 
         'CLOCK', 'NR1D1', 'NR1D2', 'DBP'
@@ -561,7 +562,7 @@ def print_summary_statistics(all_results, output_dir):
     
     print(f"\nAll results saved to directory: {os.path.abspath(output_dir)}")
 
-def main(expression_file: str = None, metadata_file: str = None):
+def main(expression_file: str = None, metadata_file: str = None, use_eigengene_weights: bool = True, weights_file: str = None):
     if expression_file is None:
         expression_file = Config.DEFAULT_EXPRESSION_FILE
     if metadata_file is None:
@@ -577,7 +578,19 @@ def main(expression_file: str = None, metadata_file: str = None):
     circadian_genes = ['PER1', 'PER2', 'CRY1', 'CRY2', 'CLOCK', 'ARNTL', 'NR1D1', 'NR1D2', 'DBP']
 
     smoothness_configs = create_optimizer_configs()
-    eigengene_weights = Config.get_eigengene_weights(n_components)
+    eigengene_weights = Config.get_eigengene_weights(n_components) if use_eigengene_weights else None
+
+    weights_to_use = eigengene_weights
+    if weights_file:
+        try:
+            wdf = pd.read_csv(weights_file, header=None)
+            row = wdf.values.flatten()
+            row = row[~pd.isna(row)]
+            if len(row) > 0:
+                weights_to_use = row.astype(float).tolist()
+                print(f"Loaded weights from {weights_file}")
+        except Exception as e:
+            print(f"Could not read weights file {weights_file}: {e}")
 
     print("=== Eigengene-Based Multi-Scale Optimization ===")
 
@@ -634,7 +647,7 @@ def main(expression_file: str = None, metadata_file: str = None):
                     method=Config.METHOD
                 )
 
-                ranks = optimizer.optimize(celltype_eigengenes, eigengene_weights)
+                ranks = optimizer.optimize(celltype_eigengenes, weights_to_use)
                 
                 metrics = optimizer.analyze_metrics(celltype_eigengenes, ranks)
 
@@ -686,7 +699,7 @@ def main(expression_file: str = None, metadata_file: str = None):
                 variation_tolerance_ratio=Config.VARIATION_TOLERANCE_RATIO
             )
 
-            ranks = optimizer.optimize(eigengenes, eigengene_weights)
+            ranks = optimizer.optimize(eigengenes, weights_to_use)
             
             metrics = optimizer.analyze_metrics(eigengenes, ranks)
 
@@ -790,5 +803,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Eigengene optimization with optional rank-vs-time plotting')
     parser.add_argument('--expression', '-e', default=None, help='Path to expression.csv')
     parser.add_argument('--metadata', '-m', default=None, help='Optional path to metadata.csv for rank-vs-time plots')
+    parser.add_argument('--no-eigengene-weights', dest='use_eigengene_weights', action='store_false',
+                        help='Disable automatic use of generated eigengene weights (default: enabled)')
+    parser.add_argument('--weights-file', dest='weights_file', default=None,
+                        help='Optional path to a CSV or whitespace-separated file with eigengene weights (one row)')
     args = parser.parse_args()
-    main(expression_file=args.expression, metadata_file=args.metadata)
+    # Pass weight-related CLI args into main
+    main(expression_file=args.expression, metadata_file=args.metadata, use_eigengene_weights=args.use_eigengene_weights, weights_file=args.weights_file)

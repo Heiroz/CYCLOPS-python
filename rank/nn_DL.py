@@ -54,10 +54,13 @@ def simple_neural_optimize(
             vi = v.unsqueeze(1)  # (n,1)
             vj = v.unsqueeze(0)  # (1,n)
             dist_mat = torch.abs(vi - vj)
+            dist_mat_per_dim = None
         else:
-            x_expanded_i = x_tensor.unsqueeze(1)  # (n,1,d)
-            x_expanded_j = x_tensor.unsqueeze(0)  # (1,n,d)
-            dist_mat = torch.sum(w * torch.abs(x_expanded_i - x_expanded_j), dim=-1)
+            x_expanded_i = x_tensor.unsqueeze(1)
+            x_expanded_j = x_tensor.unsqueeze(0)
+            abs_diff = torch.abs(x_expanded_i - x_expanded_j)
+            dist_mat_per_dim = abs_diff * w.view(1, 1, -1)
+            dist_mat = torch.sum(dist_mat_per_dim, dim=-1)
 
     model = SimpleScoreNet(n_features, hidden=hidden).to(device)
     opt = optim.Adam(model.parameters(), lr=lr)
@@ -76,7 +79,11 @@ def simple_neural_optimize(
 
         P = F.softmax(masked_logits, dim=1)
 
-        expected_length = torch.sum(P * dist_mat)
+        if 'dist_mat_per_dim' in locals() and dist_mat_per_dim is not None:
+            per_dim_lengths = torch.sum(P.unsqueeze(-1) * dist_mat_per_dim, dim=(0, 1))
+            expected_length = torch.sum(per_dim_lengths)
+        else:
+            expected_length = torch.sum(P * dist_mat)
 
         col_sums = torch.sum(P, dim=0)
         perm_penalty = torch.mean((col_sums - 1.0) ** 2)
