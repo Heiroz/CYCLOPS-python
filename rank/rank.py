@@ -32,6 +32,7 @@ class Config:
     SINE_FIT_MAX_ITERATIONS = 2000
     SINE_FIT_SMOOTH_POINTS = 200
     
+    METHOD = "neural"
     CIRCADIAN_GENES = [
         'PER1', 'PER2', 'CRY1', 'CRY2', 
         'CLOCK', 'NR1D1', 'NR1D2', 'DBP'
@@ -559,13 +560,6 @@ def print_summary_statistics(all_results, output_dir):
     print(f"Detailed results saved to: {csv_file}")
     
     print(f"\nAll results saved to directory: {os.path.abspath(output_dir)}")
-    print("Generated files:")
-    print("  - circadian_genes_eigengene_optimization.png: Main visualization with circadian genes")
-    print("  - eigengene_optimization_comparison.png: Optimization strategy comparison")
-    print("  - optimization_summary.txt: Summary statistics and recommendations")
-    print("  - detailed_results.csv: Complete numerical results")
-
-
 
 def main(expression_file: str = None, metadata_file: str = None):
     if expression_file is None:
@@ -636,7 +630,8 @@ def main(expression_file: str = None, metadata_file: str = None):
                     local_variation_factor=config['local_variation_factor'],
                     window_size=Config.DEFAULT_WINDOW_SIZE,
                     max_iterations_ratio=Config.MAX_ITERATIONS_RATIO,
-                    variation_tolerance_ratio=Config.VARIATION_TOLERANCE_RATIO
+                    variation_tolerance_ratio=Config.VARIATION_TOLERANCE_RATIO,
+                    method=Config.METHOD
                 )
 
                 ranks = optimizer.optimize(celltype_eigengenes, eigengene_weights)
@@ -713,27 +708,56 @@ def main(expression_file: str = None, metadata_file: str = None):
             return
 
         ranks_root = os.path.abspath(output_dir)
-        files = rank_plot.find_rank_csvs(ranks_root)
-        if not files:
-            print(f"No rank files found under: {ranks_root}. Skipping rank-time plots.")
-            return
-
-        print(f"Found {len(files)} rank files for rank-vs-time plotting.")
         meta = rank_plot.load_metadata(metadata_file)
 
         shift_best_dir = os.path.join(ranks_root, 'rank_vs_time', 'per_file_shifted_best')
         os.makedirs(shift_best_dir, exist_ok=True)
 
         best_per_celltype = {}
-        for fp in files:
-            joined, celltype, slug = rank_plot.join_single_file(fp, meta)
-            _, res = rank_plot.plot_single_file_shifted(joined, celltype, slug, out_dir='', step=0.05, make_plot=False)
-            key = celltype or 'ALL'
-            cur_best = best_per_celltype.get(key)
-            if (cur_best is None) or (res.corr > cur_best['result'].corr) or (
-                np.isclose(res.corr, cur_best['result'].corr) and res.r2 > cur_best['result'].r2
-            ):
-                best_per_celltype[key] = {'file': fp, 'joined': joined, 'celltype': celltype, 'slug': slug, 'result': res}
+
+        # Always use in-memory ranks (no CSV files expected)
+        print(f"Using in-memory ranks for rank-vs-time plotting for results in: {ranks_root}")
+
+        # Use per-celltype results if available, otherwise the single-dataset results
+        if celltypes is not None:
+            # iterate over all_results built earlier
+            for ct, celltype_results in all_results.items():
+                # sample names for this cell type
+                mask = (data_info['celltypes'] == ct)
+                sample_names = np.array(data_info['sample_columns'])[mask]
+                for config_name, resdict in celltype_results.items():
+                    ranks_arr = resdict['ranks'].flatten()
+                    df = pd.DataFrame({'Sample': sample_names, 'Rank': ranks_arr})
+                    # merge with metadata to emulate join_single_file output
+                    joined = df.merge(meta[['study_sample', 'time_mod24']], left_on='Sample', right_on='study_sample', how='left')
+                    joined['Cell_Type'] = ct if ct is not None else 'ALL'
+                    # use slug consistent with plot module
+                    slug = rank_plot.CONFIG_SLUGS.get(config_name, config_name)
+
+                    _, res = rank_plot.plot_single_file_shifted(joined, ct, slug, out_dir='', step=0.05, make_plot=False)
+                    key = ct or 'ALL'
+                    cur_best = best_per_celltype.get(key)
+                    if (cur_best is None) or (res.corr > cur_best['result'].corr) or (
+                        np.isclose(res.corr, cur_best['result'].corr) and res.r2 > cur_best['result'].r2
+                    ):
+                        best_per_celltype[key] = {'file': f'in-memory:{ct}:{slug}', 'joined': joined, 'celltype': ct, 'slug': slug, 'result': res}
+        else:
+            # single dataset: use `results` built earlier
+            sample_names = np.array(data_info['sample_columns'])
+            for config_name, resdict in results.items():
+                ranks_arr = resdict['ranks'].flatten()
+                df = pd.DataFrame({'Sample': sample_names, 'Rank': ranks_arr})
+                joined = df.merge(meta[['study_sample', 'time_mod24']], left_on='Sample', right_on='study_sample', how='left')
+                joined['Cell_Type'] = 'ALL'
+                slug = rank_plot.CONFIG_SLUGS.get(config_name, config_name)
+
+                _, res = rank_plot.plot_single_file_shifted(joined, None, slug, out_dir='', step=0.05, make_plot=False)
+                key = 'ALL'
+                cur_best = best_per_celltype.get(key)
+                if (cur_best is None) or (res.corr > cur_best['result'].corr) or (
+                    np.isclose(res.corr, cur_best['result'].corr) and res.r2 > cur_best['result'].r2
+                ):
+                    best_per_celltype[key] = {'file': f'in-memory:ALL:{slug}', 'joined': joined, 'celltype': None, 'slug': slug, 'result': res}
 
         for ct, info in best_per_celltype.items():
             joined = info['joined']

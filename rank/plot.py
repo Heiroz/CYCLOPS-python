@@ -5,11 +5,9 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from glob import glob
-from collections import defaultdict
 from scipy.stats import spearmanr, pearsonr
 from typing import Tuple
 from dataclasses import dataclass
-from pathlib import Path
 
 CONFIG_SLUGS = {
     'Pure Smoothness': 'Pure_Smoothness',

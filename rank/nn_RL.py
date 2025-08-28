@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from typing import Optional, Tuple, Dict, Any, List
+from typing import Optional, Tuple, Dict, List
 import math
 
 class AttentionLayer(nn.Module):
@@ -91,23 +91,14 @@ class PointerNetwork(nn.Module):
     
     def decode_step(self, decoder_input: torch.Tensor, encoder_output: torch.Tensor, 
                    mask: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Single decoding step"""
-        # decoder_input: (batch_size, 1, hidden_dim)
-        # encoder_output: (batch_size, seq_len, hidden_dim)
-        # mask: (batch_size, seq_len) - 1 for available, 0 for visited
-        
-        # Apply attention
         context, _ = self.decoder_attention(decoder_input)
         
-        # Pointer mechanism
         query = self.pointer_query(context)  # (batch_size, 1, hidden_dim)
         keys = self.pointer_key(encoder_output)  # (batch_size, seq_len, hidden_dim)
         
-        # Compute attention scores
         scores = torch.matmul(query, keys.transpose(-2, -1))  # (batch_size, 1, seq_len)
         scores = scores.squeeze(1)  # (batch_size, seq_len)
         
-        # Apply mask
         scores = scores.masked_fill(mask == 0, -1e9)
         
         # Get probabilities
@@ -116,17 +107,6 @@ class PointerNetwork(nn.Module):
         return probabilities, context
     
     def forward(self, x: torch.Tensor, deterministic: bool = False) -> Tuple[List[torch.Tensor], torch.Tensor]:
-        """
-        Forward pass
-        
-        Args:
-            x: Input features (batch_size, seq_len, input_dim)
-            deterministic: If True, use greedy selection; if False, use sampling
-            
-        Returns:
-            selected_indices: List of selected indices for each step
-            total_log_prob: Total log probability of the tour
-        """
         batch_size, seq_len, _ = x.shape
         device = x.device
         
@@ -143,26 +123,20 @@ class PointerNetwork(nn.Module):
         log_probs = []
         
         for step in range(seq_len):
-            # Decode step
             probabilities, context = self.decode_step(decoder_input, encoder_output, mask)
             
             if deterministic:
-                # Greedy selection
                 selected_idx = torch.argmax(probabilities, dim=-1)
             else:
-                # Sample from distribution
                 selected_idx = torch.multinomial(probabilities, 1).squeeze(-1)
             
-            # Compute log probability
             log_prob = torch.log(probabilities.gather(1, selected_idx.unsqueeze(-1)).squeeze(-1) + 1e-10)
             
             selected_indices.append(selected_idx)
             log_probs.append(log_prob)
             
-            # Update mask
             mask.scatter_(1, selected_idx.unsqueeze(-1), 0)
             
-            # Update decoder input with selected node features
             selected_features = encoder_output.gather(1, selected_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, 1, self.hidden_dim))
             decoder_input = selected_features
         
@@ -170,24 +144,19 @@ class PointerNetwork(nn.Module):
         
         return selected_indices, total_log_prob
 
-class NeuralTSPOptimizer:
-    """Neural network-based TSP optimizer using reinforcement learning"""
-    
+class NeuralTSPOptimizer:    
     def __init__(self, input_dim: int, hidden_dim: int = 128, learning_rate: float = 1e-4, device: str = 'cuda'):
         self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
         self.input_dim = input_dim
         
-        # Initialize network
         self.network = PointerNetwork(input_dim, hidden_dim).to(self.device)
         self.optimizer = optim.Adam(self.network.parameters(), lr=learning_rate)
         
-        # Training parameters
-        self.baseline_alpha = 0.95  # Exponential moving average for baseline
+        self.baseline_alpha = 0.95
         self.baseline = None
         
     def compute_tour_length(self, x: torch.Tensor, tour_indices: List[torch.Tensor], 
                            weights: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """Compute the total length of the tour"""
         batch_size = x.shape[0]
         device = x.device
         
@@ -197,14 +166,12 @@ class NeuralTSPOptimizer:
         total_length = torch.zeros(batch_size, device=device)
         
         for i in range(len(tour_indices)):
-            current_idx = tour_indices[i]  # (batch_size,)
-            next_idx = tour_indices[(i + 1) % len(tour_indices)]  # (batch_size,)
+            current_idx = tour_indices[i]
+            next_idx = tour_indices[(i + 1) % len(tour_indices)]
             
-            # Get current and next node features
             current_nodes = x.gather(1, current_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, 1, self.input_dim)).squeeze(1)
             next_nodes = x.gather(1, next_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, 1, self.input_dim)).squeeze(1)
             
-            # Compute weighted distance
             distances = torch.sum(weights * torch.abs(current_nodes - next_nodes), dim=-1)
             total_length += distances
         
@@ -212,11 +179,7 @@ class NeuralTSPOptimizer:
     
     def train_step(self, x: torch.Tensor, weights: Optional[torch.Tensor] = None, 
                    n_samples: int = 1) -> Dict[str, float]:
-        """Single training step"""
         self.network.train()
-        batch_size = x.shape[0]
-        
-        # Sample multiple tours
         all_tours = []
         all_log_probs = []
         all_lengths = []
@@ -229,28 +192,22 @@ class NeuralTSPOptimizer:
             all_log_probs.append(log_probs)
             all_lengths.append(tour_length)
         
-        # Stack results
         all_log_probs = torch.stack(all_log_probs, dim=0)  # (n_samples, batch_size)
         all_lengths = torch.stack(all_lengths, dim=0)  # (n_samples, batch_size)
         
-        # Find best tour for each batch element
-        best_indices = torch.argmin(all_lengths, dim=0)  # (batch_size,)
-        best_lengths = all_lengths.gather(0, best_indices.unsqueeze(0)).squeeze(0)  # (batch_size,)
-        best_log_probs = all_log_probs.gather(0, best_indices.unsqueeze(0)).squeeze(0)  # (batch_size,)
+        best_indices = torch.argmin(all_lengths, dim=0)
+        best_lengths = all_lengths.gather(0, best_indices.unsqueeze(0)).squeeze(0)
+        best_log_probs = all_log_probs.gather(0, best_indices.unsqueeze(0)).squeeze(0)
         
-        # Update baseline
         if self.baseline is None:
             self.baseline = best_lengths.mean().item()
         else:
             self.baseline = self.baseline_alpha * self.baseline + (1 - self.baseline_alpha) * best_lengths.mean().item()
         
-        # Compute advantage (lower length is better, so advantage = baseline - length)
         advantage = self.baseline - best_lengths.detach()
         
-        # Policy gradient loss
         loss = -(best_log_probs * advantage).mean()
         
-        # Backpropagation
         self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=1.0)
@@ -265,8 +222,6 @@ class NeuralTSPOptimizer:
     
     def optimize(self, x: np.ndarray, weights: Optional[np.ndarray] = None, 
                  n_epochs: int = 100, batch_size: int = 32) -> np.ndarray:
-        """Train the network and return optimized ranking"""
-        # Convert to torch tensors
         x_tensor = torch.FloatTensor(x).to(self.device)
         if weights is not None:
             weights_tensor = torch.FloatTensor(weights).to(self.device)
@@ -277,48 +232,36 @@ class NeuralTSPOptimizer:
         
         print(f"Training neural TSP optimizer for {n_epochs} epochs...")
         
-        # Training loop
         for epoch in range(n_epochs):
-            # Create batch (for simplicity, use the whole dataset as one batch)
-            x_batch = x_tensor.unsqueeze(0)  # (1, n_samples, n_features)
+            x_batch = x_tensor.unsqueeze(0)
             
-            # Training step
             metrics = self.train_step(x_batch, weights_tensor, n_samples=5)
             
-            if epoch % 20 == 0:
+            if epoch % 10 == 0:
                 print(f"Epoch {epoch}: Loss={metrics['loss']:.4f}, "
                       f"Avg Length={metrics['avg_length']:.4f}, "
                       f"Baseline={metrics['baseline']:.4f}")
         
-        # Generate final tour
         self.network.eval()
         with torch.no_grad():
             x_batch = x_tensor.unsqueeze(0)
             tour_indices, _ = self.network(x_batch, deterministic=True)
             
-            # Convert to numpy
             tour = [idx.cpu().numpy()[0] for idx in tour_indices]
         
-        # Convert tour to ranks
         ranks = np.zeros(n_samples, dtype=int)
         ranks[tour] = np.arange(n_samples)
         
         return ranks.reshape(-1, 1)
 
-# Factory function to create neural optimizer
 def create_neural_optimizer(input_dim: int, **kwargs) -> NeuralTSPOptimizer:
-    """Create neural TSP optimizer"""
     return NeuralTSPOptimizer(input_dim, **kwargs)
 
-# Wrapper function for backward compatibility
 def neural_multi_scale_optimize(x: np.ndarray, 
                                weights: Optional[np.ndarray] = None,
                                n_epochs: int = 100,
                                hidden_dim: int = 128,
                                learning_rate: float = 1e-4) -> np.ndarray:
-    """
-    Neural network-based multi-scale optimization
-    """
     optimizer = NeuralTSPOptimizer(
         input_dim=x.shape[1],
         hidden_dim=hidden_dim,

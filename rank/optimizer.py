@@ -1,6 +1,6 @@
 import numpy as np
 from typing import Optional, Dict
-from neural_network import neural_multi_scale_optimize
+from nn_DL import neural_multi_scale_optimize
 
 class MultiScaleOptimizer:
     
@@ -209,9 +209,6 @@ class MultiScaleOptimizer:
 
 
 def create_optimizer_configs() -> list:
-    """
-    Create predefined optimizer configurations for different strategies
-    """
     configs = [
         {
             'name': 'Pure Smoothness',
@@ -238,7 +235,7 @@ def create_optimizer_configs() -> list:
             'method': 'greedy'
         },
         {
-            'name': 'Neural Balanced',  # 新增神经网络配置
+            'name': 'Neural Balanced',
             'smoothness_factor': 0.7,
             'local_variation_factor': 0.3,
             'method': 'neural'
@@ -253,9 +250,6 @@ def multi_scale_optimize(x: np.ndarray,
                         smoothness_factor: float = 0.7,
                         local_variation_factor: float = 0.3,
                         window_size: int = 10) -> np.ndarray:
-    """
-    Convenience function for backward compatibility
-    """
     optimizer = MultiScaleOptimizer(
         smoothness_factor=smoothness_factor,
         local_variation_factor=local_variation_factor,
@@ -266,8 +260,5 @@ def multi_scale_optimize(x: np.ndarray,
 
 
 def analyze_smoothness_and_variation(data: np.ndarray, ranks: np.ndarray) -> Dict[str, float]:
-    """
-    Convenience function for backward compatibility
-    """
     optimizer = MultiScaleOptimizer()
     return optimizer.analyze_metrics(data, ranks)
