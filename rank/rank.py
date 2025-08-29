@@ -16,7 +16,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'my_cyclops'))
 
 class Config:
     
-    N_COMPONENTS = 50
+    N_COMPONENTS = 5
     MIN_SAMPLES_PER_CELLTYPE = 10
     
     DEFAULT_SMOOTHNESS_FACTOR = 0.7
@@ -214,29 +214,16 @@ def load_and_process_expression_data(expression_file, n_components=None):
     print(f"Expression data type: {expression_data.dtype}")
     print(f"Expression data range: {expression_data.min():.4f} to {expression_data.max():.4f}")
     
-    print("Standardizing expression data...")
-    scaler = StandardScaler()
-    expression_scaled = scaler.fit_transform(expression_data)
-    
-    print(f"Performing PCA to get {n_components} eigengenes...")
-    eigengenes, pca_model, explained_variance = create_eigengenes(
-        expression_scaled, n_components
-    )
-    
-    print(f"Eigengenes shape: {eigengenes.shape}")
-    print(f"Explained variance ratio (first 10): {explained_variance[:10]}")
-    print(f"Total explained variance: {explained_variance.sum():.4f}")
-    
+    print("Loaded expression matrix; deferring PCA to per-celltype or single-dataset processing.")
     return {
-        'eigengenes': eigengenes,
         'original_expression': expression_data,
         'gene_names': gene_names,
         'sample_columns': sample_columns,
         'celltypes': celltypes,
         'times': times,
-        'pca_model': pca_model,
-        'scaler': scaler,
-        'explained_variance': explained_variance,
+        'pca_model': None,
+        'scaler': None,
+        'explained_variance': None,
         'n_components': n_components
     }
 
@@ -353,6 +340,8 @@ def create_eigengene_comparison_visualization(all_results, representative_cellty
     
     _, axes = plt.subplots(len(celltype_results), n_eigengenes_plot, 
                             figsize=(4*n_eigengenes_plot, 3*len(celltype_results)))
+    # Ensure axes is at least 2D for consistent indexing
+    axes = np.atleast_2d(axes)
     
     colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
     
@@ -364,9 +353,13 @@ def create_eigengene_comparison_visualization(all_results, representative_cellty
         order_indices = np.argsort(ranks.flatten())
         ordered_eigengenes = eigengenes_data[order_indices]
         n_samples = len(ordered_eigengenes)
-        
+        available = ordered_eigengenes.shape[1]
+
         for eigen_idx in range(n_eigengenes_plot):
             ax = axes[config_idx, eigen_idx]
+            if eigen_idx >= available:
+                ax.axis('off')
+                continue
             
             x_range = np.array(range(1, n_samples + 1))
             eigen_values = ordered_eigengenes[:, eigen_idx]
@@ -595,7 +588,6 @@ def main(expression_file: str = None, metadata_file: str = None, use_eigengene_w
     print("=== Eigengene-Based Multi-Scale Optimization ===")
 
     data_info = load_and_process_expression_data(expression_file, n_components)
-    eigengenes = data_info['eigengenes']
     celltypes = data_info['celltypes']
 
     circadian_expressions, found_circadian_genes = get_circadian_gene_expressions(data_info, circadian_genes)
@@ -626,12 +618,40 @@ def main(expression_file: str = None, metadata_file: str = None, use_eigengene_w
         for celltype in eligible_celltypes:
             print(f"\n=== Processing Cell Type {celltype} ===")
 
+            # Build a per-celltype PCA from the original expression matrix
             celltype_mask = celltypes == celltype
-            celltype_eigengenes = eigengenes[celltype_mask]
+            # original_expression is samples x genes
+            sub_expression = data_info['original_expression'][celltype_mask]
             celltype_circadian = circadian_expressions[celltype_mask]
-            n_samples = len(celltype_eigengenes)
+            n_samples = sub_expression.shape[0]
 
             print(f"Samples: {n_samples}")
+
+            # Determine components for this celltype (cannot exceed n_samples)
+            n_components_ct = min(n_components, max(1, n_samples))
+
+            # Standardize genes for this celltype and run PCA to get eigengenes
+            if n_samples > 0:
+                local_scaler = StandardScaler()
+                try:
+                    sub_scaled = local_scaler.fit_transform(sub_expression)
+                except Exception:
+                    # fallback: cast to float then scale
+                    sub_scaled = local_scaler.fit_transform(sub_expression.astype(float))
+
+                celltype_eigengenes, pca_model_ct, explained_variance_ct = create_eigengenes(sub_scaled, n_components=n_components_ct)
+            else:
+                celltype_eigengenes = np.empty((0, n_components_ct))
+                pca_model_ct = None
+                explained_variance_ct = np.array([])
+
+            if weights_to_use is None:
+                weights_for_ct = None
+            else:
+                try:
+                    weights_for_ct = list(weights_to_use)[:celltype_eigengenes.shape[1]]
+                except Exception:
+                    weights_for_ct = weights_to_use
 
             celltype_results = {}
 
@@ -647,7 +667,7 @@ def main(expression_file: str = None, metadata_file: str = None, use_eigengene_w
                     method=Config.METHOD
                 )
 
-                ranks = optimizer.optimize(celltype_eigengenes, weights_to_use)
+                ranks = optimizer.optimize(celltype_eigengenes, weights_for_ct)
                 
                 metrics = optimizer.analyze_metrics(celltype_eigengenes, ranks)
 
@@ -656,7 +676,9 @@ def main(expression_file: str = None, metadata_file: str = None, use_eigengene_w
                     'metrics': metrics,
                     'config': config,
                     'eigengenes': celltype_eigengenes,
-                    'circadian_expressions': celltype_circadian
+                    'circadian_expressions': celltype_circadian,
+                    'pca_model': pca_model_ct,
+                    'explained_variance': explained_variance_ct
                 }
 
                 print(f"    Balance Score: {metrics['balance_score']:.4f}")
@@ -685,8 +707,28 @@ def main(expression_file: str = None, metadata_file: str = None, use_eigengene_w
             print(f"Final output directory: {os.path.abspath(output_dir)}")
 
         results = {}
-        n_samples = len(eigengenes)
+        # Compute PCA for the entire dataset once (single-dataset mode)
+        original_expression = data_info['original_expression']
+        n_samples = original_expression.shape[0]
         print(f"Total samples: {n_samples}")
+
+        n_components_sd = min(n_components, max(1, n_samples))
+        scaler_sd = StandardScaler()
+        try:
+            scaled_sd = scaler_sd.fit_transform(original_expression)
+        except Exception:
+            scaled_sd = scaler_sd.fit_transform(original_expression.astype(float))
+
+        eigengenes_sd, pca_model_sd, explained_variance_sd = create_eigengenes(scaled_sd, n_components=n_components_sd)
+
+        # Trim weights for single-dataset PCA
+        if weights_to_use is None:
+            weights_for_sd = None
+        else:
+            try:
+                weights_for_sd = list(weights_to_use)[:eigengenes_sd.shape[1]]
+            except Exception:
+                weights_for_sd = weights_to_use
 
         for config in smoothness_configs:
             print(f"Testing {config['name']}...")
@@ -699,16 +741,18 @@ def main(expression_file: str = None, metadata_file: str = None, use_eigengene_w
                 variation_tolerance_ratio=Config.VARIATION_TOLERANCE_RATIO
             )
 
-            ranks = optimizer.optimize(eigengenes, weights_to_use)
+            ranks = optimizer.optimize(eigengenes_sd, weights_for_sd)
             
-            metrics = optimizer.analyze_metrics(eigengenes, ranks)
+            metrics = optimizer.analyze_metrics(eigengenes_sd, ranks)
 
             results[config['name']] = {
                 'ranks': ranks,
                 'metrics': metrics,
                 'config': config,
-                'eigengenes': eigengenes,
-                'circadian_expressions': circadian_expressions
+                'eigengenes': eigengenes_sd,
+                'circadian_expressions': circadian_expressions,
+                'pca_model': pca_model_sd,
+                'explained_variance': explained_variance_sd
             }
 
             print(f"  Balance Score: {metrics['balance_score']:.4f}")
